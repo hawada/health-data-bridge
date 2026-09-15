@@ -1,0 +1,2 @@
+"NSHealthShareUsageDescription" = "HealthDataBridge reads sleep and heart-rate samples, and optional recovery HRV when configured, to avoid overlapping WHOOP imports.";
+"NSHealthUpdateUsageDescription" = "HealthDataBridge writes missing WHOOP sleep stages and heart-rate samples, plus optional recovery HRV when configured.";

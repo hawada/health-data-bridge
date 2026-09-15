@@ -1,0 +1,19 @@
+name: Core tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: Core XCTest
+        run: swift test --jobs 2
+      - name: Core checks
+        run: swift run --jobs 2 WHOOPHealthSyncCoreChecks

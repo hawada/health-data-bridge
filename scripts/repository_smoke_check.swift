@@ -1,0 +1,282 @@
+import Foundation
+import WHOOPHealthSyncCore
+
+@main
+struct RepositorySmokeCheck {
+    @MainActor
+    static func main() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WHOOPHealthSyncRepositorySmoke-\(UUID().uuidString)", isDirectory: true)
+        let fileURL = directory.appendingPathComponent("sync-store.json", isDirectory: false)
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let repository = SyncRepository(fileURL: fileURL)
+        try expect(try repository.checkpoints() == SyncCheckpointState(lastHeartRateEnd: nil, lastSleepQueryEnd: nil), "Fresh repository should have empty checkpoints.")
+        expect(repository.diagnostics() == .empty, "Fresh repository should have empty diagnostics.")
+
+        try repository.setHeartRateCheckpoint(date(100), resolution: 6)
+        try repository.setSleepCheckpoint(date(200))
+
+        let session = try SleepNormalizer.normalize(
+            SleepSession(
+                whoopSleepID: "sleep-smoke",
+                sourceUpdatedAt: date(210),
+                start: date(0),
+                end: date(120),
+                timezoneOffsetSeconds: nil,
+                isNap: false,
+                stages: [
+                    SleepStageInterval(start: date(0), end: date(60), stage: .core),
+                    SleepStageInterval(start: date(60), end: date(120), stage: .rem)
+                ]
+            )
+        )
+        let fingerprint = SleepFingerprint.make(for: session)
+        try repository.upsertSleepRecord(session: session, fingerprint: fingerprint, result: "smoke")
+
+        let plan = SyncWindowPlanner.makePlan(
+            now: date(300),
+            checkpoints: try repository.checkpoints(),
+            heartRateStepSeconds: 6
+        )
+        let runID = try repository.createRun(startedAt: date(300), plan: plan)
+        var summary = SyncSummary()
+        summary.sleepsDownloaded = 1
+        summary.sleepsWritten = 1
+        summary.sleepsUnchanged = 2
+        summary.sleepsRevised = 3
+        summary.sleepsDiscardedOutOfWindow = 4
+        summary.stagesWritten = 2
+        summary.heartRateDownloaded = 5
+        summary.heartRateDiscardedOutOfWindow = 6
+        summary.heartRateWritten = 3
+        summary.heartRateSkipped = 7
+        summary.heartRateRemoved = 8
+        summary.effectiveHeartRateResolution = 60
+        summary.elapsedSeconds = 1.25
+        summary.errors = [
+            "smoke-warning for jose@example.com Authorization: Bearer secret-token password=secret-password refreshToken=refresh-secret jwt=header.payload.signature"
+        ]
+        try repository.appendEvent(
+            runID: runID,
+            level: "info",
+            category: "smoke",
+            message: "repository event for jose@example.com Authorization: Bearer secret-token password=secret-password"
+        )
+        try repository.finishRun(runID, summary: summary, status: "partial")
+
+        let reloaded = SyncRepository(fileURL: fileURL)
+        try expect(
+            try reloaded.checkpoints() == SyncCheckpointState(
+                lastHeartRateEnd: date(100),
+                lastSleepQueryEnd: date(200),
+                lastHeartRateResolution: 6
+            ),
+            "Reloaded repository should preserve checkpoints and HR resolution."
+        )
+        expect(reloaded.sleepRecord(for: "sleep-smoke")?.fingerprint == fingerprint, "Reloaded repository should preserve sleep fingerprints.")
+        let diagnostics = reloaded.diagnostics()
+        expect(diagnostics.lastHeartRateCheckpoint == date(100), "Diagnostics should expose HR checkpoint.")
+        expect(diagnostics.lastSleepCheckpoint == date(200), "Diagnostics should expose sleep checkpoint.")
+        expect(diagnostics.heartRateResolution == 6, "Diagnostics should expose HR resolution.")
+        expect(diagnostics.lastRunStatus == "partial", "Diagnostics should expose last run status.")
+        expect(diagnostics.lastRunErrorsText.contains("[redacted-email]"), "Diagnostics should expose sanitized last-run errors.")
+        expect(diagnostics.lastRunErrorsText.contains("Bearer [redacted-token]"), "Diagnostics should redact bearer tokens in last-run errors.")
+        expect(!diagnostics.lastRunErrorsText.contains("secret-password"), "Diagnostics should redact passwords in last-run errors.")
+        expect(diagnostics.recordedSleepCount == 1, "Diagnostics should expose recorded sleep count.")
+        expect(diagnostics.recentEvents.first?.message.contains("[redacted-email]") == true, "Diagnostics should expose sanitized persisted events.")
+        expect(diagnostics.recentEvents.first?.message.contains("Bearer [redacted-token]") == true, "Diagnostics should redact bearer tokens in persisted events.")
+        expect(diagnostics.recentEvents.first?.runID == runID, "Persisted events should keep their run ID.")
+        let persistedJSON = try String(contentsOf: fileURL, encoding: .utf8)
+        expect(!persistedJSON.contains("jose@example.com"), "Persisted JSON should redact emails.")
+        expect(!persistedJSON.contains("secret-token"), "Persisted JSON should redact bearer token material.")
+        expect(!persistedJSON.contains("secret-password"), "Persisted JSON should redact password material.")
+        expect(!persistedJSON.contains("refresh-secret"), "Persisted JSON should redact refresh token material.")
+        expect(!persistedJSON.contains("header.payload.signature"), "Persisted JSON should redact JWT-like material.")
+        expect(persistedJSON.contains(#""sleepsWritten" : 1"#), "Persisted run should store sleepsWritten.")
+        expect(persistedJSON.contains(#""sleepsUnchanged" : 2"#), "Persisted run should store sleepsUnchanged.")
+        expect(persistedJSON.contains(#""sleepsRevised" : 3"#), "Persisted run should store sleepsRevised.")
+        expect(persistedJSON.contains(#""heartRateDownloaded" : 5"#), "Persisted run should store HR download count.")
+        expect(persistedJSON.contains(#""heartRateDiscardedOutOfWindow" : 6"#), "Persisted run should store HR discarded count.")
+        expect(persistedJSON.contains(#""heartRateSkipped" : 7"#), "Persisted run should store HR skipped count.")
+        expect(persistedJSON.contains(#""heartRateRemoved" : 8"#), "Persisted run should store HR removed count.")
+        expect(persistedJSON.contains(#""effectiveHeartRateResolution" : 60"#), "Persisted run should store effective HR resolution.")
+        expect(persistedJSON.contains(#""elapsedSeconds" : 1.25"#), "Persisted run should store elapsed seconds.")
+
+        let migrationDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WHOOPHealthSyncRepositoryMigration-\(UUID().uuidString)", isDirectory: true)
+        let migrationURL = migrationDirectory.appendingPathComponent("sync-store.json", isDirectory: false)
+        defer {
+            try? FileManager.default.removeItem(at: migrationDirectory)
+        }
+        let migrationRepository = SyncRepository(fileURL: migrationURL)
+        let fallbackSession = try sleepSession(id: "deep-dive-sleep:2026-07-12", start: date(1_000))
+        let realSession = try sleepSession(id: "real-activity-id", start: date(1_000))
+        let contentFingerprint = SleepFingerprint.make(for: fallbackSession)
+        try migrationRepository.upsertSleepRecord(session: fallbackSession, fingerprint: contentFingerprint, result: "fallback")
+        try migrationRepository.upsertSleepRecord(session: realSession, fingerprint: contentFingerprint, result: "real")
+        expect(migrationRepository.sleepRecord(for: "deep-dive-sleep:2026-07-12") == nil, "Fallback sleep record should be consolidated into the real activity ID.")
+        expect(migrationRepository.sleepRecord(for: "real-activity-id")?.fingerprint == contentFingerprint, "Real activity ID should keep the content fingerprint.")
+        expect(migrationRepository.diagnostics().recordedSleepCount == 1, "Fallback-to-real consolidation should keep one local sleep record.")
+
+        try migrationRepository.upsertSleepRecord(session: fallbackSession, fingerprint: contentFingerprint, result: "fallback-again")
+        expect(migrationRepository.sleepRecord(for: "real-activity-id") != nil, "A later fallback import should not downgrade an existing real activity ID record.")
+        expect(migrationRepository.sleepRecord(for: "deep-dive-sleep:2026-07-12") == nil, "A later fallback import should still not create a duplicate synthetic record.")
+        expect(migrationRepository.diagnostics().recordedSleepCount == 1, "Real-to-fallback repeat should stay consolidated.")
+
+        let legacyDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WHOOPHealthSyncRepositoryLegacy-\(UUID().uuidString)", isDirectory: true)
+        let legacyURL = legacyDirectory.appendingPathComponent("sync-store.json", isDirectory: false)
+        defer {
+            try? FileManager.default.removeItem(at: legacyDirectory)
+        }
+        try FileManager.default.createDirectory(at: legacyDirectory, withIntermediateDirectories: true)
+        let legacyJSON = """
+        {
+          "runs": [
+            {
+              "id": "00000000-0000-0000-0000-000000000001",
+              "startedAt": "1970-01-01T00:00:00Z",
+              "status": "success",
+              "sleepsDownloaded": 1,
+              "stagesWritten": 2,
+              "stagesSkipped": 0,
+              "stagesRemoved": 0,
+              "heartRateDownloaded": 3,
+              "heartRateWritten": 4,
+              "heartRateSkipped": 0,
+              "heartRateRemoved": 0,
+              "errorsText": ""
+            }
+          ],
+          "sleepRecords": {},
+          "states": {}
+        }
+        """
+        try Data(legacyJSON.utf8).write(to: legacyURL, options: [.atomic])
+        let legacyRepository = SyncRepository(fileURL: legacyURL)
+        expect(legacyRepository.diagnostics().lastRunStatus == "success", "Repository should load legacy run records that lack newer counters.")
+        expect(legacyRepository.diagnostics().recentEvents.isEmpty, "Repository should load legacy stores that lack events.")
+
+        let boundedDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WHOOPHealthSyncRepositoryBoundedRuns-\(UUID().uuidString)", isDirectory: true)
+        let boundedURL = boundedDirectory.appendingPathComponent("sync-store.json", isDirectory: false)
+        defer {
+            try? FileManager.default.removeItem(at: boundedDirectory)
+        }
+        let boundedRepository = SyncRepository(fileURL: boundedURL)
+        let boundedPlan = SyncWindowPlanner.makePlan(
+            now: date(10_000),
+            checkpoints: SyncCheckpointState(lastHeartRateEnd: nil, lastSleepQueryEnd: nil),
+            heartRateStepSeconds: 6
+        )
+        for offset in 0..<125 {
+            let run = try boundedRepository.createRun(
+                startedAt: date(TimeInterval(offset)),
+                plan: boundedPlan
+            )
+            var runSummary = SyncSummary()
+            runSummary.sleepsDownloaded = offset
+            try boundedRepository.finishRun(run, summary: runSummary, status: "success-\(offset)")
+        }
+        let boundedJSON = try Data(contentsOf: boundedURL)
+        let boundedObject = try JSONSerialization.jsonObject(with: boundedJSON, options: []) as? [String: Any]
+        let boundedRuns = boundedObject?["runs"] as? [[String: Any]] ?? []
+        expect(boundedRuns.count == 100, "Repository should keep a bounded run history.")
+        let boundedDiagnostics = boundedRepository.diagnostics()
+        expect(boundedDiagnostics.lastRunStatus == "success-124", "Bounded run trimming should retain the newest run for diagnostics.")
+        expect(!boundedRuns.contains { $0["status"] as? String == "success-0" }, "Bounded run trimming should remove oldest runs first.")
+
+        // V2 failures must preserve both the original bytes and the committed memory snapshot.
+        let corruptURL = directory.appendingPathComponent("corrupt.json")
+        let corruptBytes = Data("{not-json".utf8)
+        try corruptBytes.write(to: corruptURL)
+        let corrupt = SyncRepository(fileURL: corruptURL)
+        expect(corrupt.loadError != nil, "Corruption must block, never become a fresh store.")
+        do { _ = try corrupt.checkpoints(); fatalError("Corrupt checkpoints must throw") } catch {}
+        do { try corrupt.setSleepCheckpoint(date(999)); fatalError("Corrupt store must reject writes") } catch {}
+        try expect(try Data(contentsOf: corruptURL) == corruptBytes, "Corrupt original must be preserved.")
+
+        let failureURL = directory.appendingPathComponent("failure.json")
+        let originalRepo = SyncRepository(fileURL: failureURL)
+        try originalRepo.setSleepCheckpoint(date(123))
+        let originalBytes = try Data(contentsOf: failureURL)
+        let failing = SyncRepository(fileURL: failureURL, writeData: { _, _ in throw CocoaError(.fileWriteNoPermission) })
+        do { try failing.setSleepCheckpoint(date(999)); fatalError("Injected write should fail") } catch {}
+        try expect(try failing.checkpoints().lastSleepQueryEnd == date(123), "Failed write must roll back memory.")
+        try expect(try Data(contentsOf: failureURL) == originalBytes, "Failed write must preserve disk.")
+        do { try failing.appendEvent(runID: nil, level: "info", category: "failed", message: "must not publish"); fatalError("Injected event should fail") } catch {}
+        expect(failing.diagnostics().recentEvents.isEmpty, "Failed event write must not leak uncommitted memory.")
+
+        var legacyObject = try JSONSerialization.jsonObject(with: originalBytes) as! [String: Any]
+        legacyObject.removeValue(forKey: "schemaVersion"); legacyObject.removeValue(forKey: "recovery")
+        let migrationFixtureURL = directory.appendingPathComponent("legacy.json")
+        let legacyBytes = try JSONSerialization.data(withJSONObject: legacyObject)
+        try legacyBytes.write(to: migrationFixtureURL)
+        let migrated = SyncRepository(fileURL: migrationFixtureURL)
+        try expect(try migrated.checkpoints().lastSleepQueryEnd == date(123), "Migration preserves old checkpoints.")
+        try expect(try !migrated.recoveryState().enabled, "Migration defaults HRV to disabled.")
+        try migrated.setHeartRateCheckpoint(date(456), resolution: 60)
+        try expect(try Data(contentsOf: migrationFixtureURL.appendingPathExtension("v1-backup")) == legacyBytes, "Migration backup is exact.")
+        let migratedObject = try JSONSerialization.jsonObject(with: Data(contentsOf: migrationFixtureURL)) as! [String: Any]
+        expect(migratedObject["schemaVersion"] as? Int == 2, "Migrated schema must be v2.")
+        expect(migrated.requiresManualAccountBinding, "Legacy checkpoints require manual ownership confirmation.")
+        let beforeBinding = try Data(contentsOf: migrationFixtureURL)
+        do { try migrated.validateAccount("account-A"); fatalError("Validation cannot silently bind legacy progress") }
+        catch let error as SyncRepositoryError { guard case .accountBindingRequired = error else { throw error } }
+        try expect(try Data(contentsOf: migrationFixtureURL) == beforeBinding, "Rejected legacy validation leaves disk unchanged.")
+        try migrated.bindAccountManually("account-A")
+        expect(!migrated.requiresManualAccountBinding, "Explicit binding resolves the migration prompt.")
+        do { try migrated.validateAccount("account-B"); fatalError("Account mismatch must throw") } catch {}
+        var recoveryState = try migrated.recoveryState()
+        recoveryState.accountKey = "account-A"
+        recoveryState.pendingItems["old"] = RecoveryPendingItem(cycleID: "old", firstDetectedAt: date(0), reason: "access")
+        try migrated.commitRecoveryState(recoveryState)
+        let migratedReload = SyncRepository(fileURL: migrationFixtureURL)
+        try migratedReload.validateAccount("account-A")
+        expect(!migratedReload.requiresManualAccountBinding, "Account binding survives restart.")
+        try expect(try migratedReload.recoveryState().pendingItems.count == 1, "Historical pending state survives restart.")
+
+        let newStore = SyncRepository(fileURL: directory.appendingPathComponent("new-account.json"))
+        try newStore.validateAccount("new-account")
+        do { try newStore.validateAccount("other-account"); fatalError("New stores must persist the first authenticated identity") }
+        catch let error as RecoverySyncError { expect(error == .accountMismatch, "New-store identity is persisted.") }
+        do { try failing.bindAccountManually("failed-account"); fatalError("Binding write failure must throw") } catch {}
+        expect(failing.requiresManualAccountBinding, "Failed binding must preserve unbound memory state.")
+        try expect(try Data(contentsOf: failureURL) == originalBytes, "Failed binding retains original disk bytes.")
+        let futureURL = directory.appendingPathComponent("future.json")
+        try Data("{\"schemaVersion\":99}".utf8).write(to: futureURL)
+        let future = SyncRepository(fileURL: futureURL)
+        expect(future.loadError != nil, "Unknown schemas must block synchronization.")
+        print("SyncRepository smoke check passed (migration, corruption, disk rollback, account separation)")
+    }
+
+    private static func date(_ seconds: TimeInterval) -> Date {
+        Date(timeIntervalSince1970: seconds)
+    }
+
+    private static func sleepSession(id: String, start: Date) throws -> SleepSession {
+        try SleepNormalizer.normalize(
+            SleepSession(
+                whoopSleepID: id,
+                sourceUpdatedAt: start.addingTimeInterval(600),
+                start: start,
+                end: start.addingTimeInterval(120),
+                timezoneOffsetSeconds: nil,
+                isNap: false,
+                stages: [
+                    SleepStageInterval(start: start, end: start.addingTimeInterval(60), stage: .core),
+                    SleepStageInterval(start: start.addingTimeInterval(60), end: start.addingTimeInterval(120), stage: .rem)
+                ]
+            )
+        )
+    }
+
+    private static func expect(_ condition: @autoclosure () throws -> Bool, _ message: String) rethrows {
+        guard try condition() else {
+            fatalError(message)
+        }
+    }
+}

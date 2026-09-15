@@ -1,0 +1,456 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		5D1000000000000000000101 /* WHOOPHealthSyncApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000201 /* WHOOPHealthSyncApp.swift */; };
+		5D1000000000000000000102 /* AppLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000202 /* AppLog.swift */; };
+		5D1000000000000000000103 /* SyncViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000203 /* SyncViewModel.swift */; };
+		5D1000000000000000000104 /* SyncDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000204 /* SyncDashboardView.swift */; };
+		5D1000000000000000000105 /* AuthenticationSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000205 /* AuthenticationSheet.swift */; };
+		5D1000000000000000000106 /* SyncModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000206 /* SyncModels.swift */; };
+		5D1000000000000000000107 /* SyncRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000207 /* SyncRepository.swift */; };
+		5D1000000000000000000108 /* MetadataKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000208 /* MetadataKeys.swift */; };
+		5D1000000000000000000109 /* KeychainTokenStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000209 /* KeychainTokenStore.swift */; };
+		5D1000000000000000000110 /* WhoopAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000210 /* WhoopAuthService.swift */; };
+		5D1000000000000000000111 /* WhoopAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000211 /* WhoopAPIClient.swift */; };
+		5D1000000000000000000113 /* HealthKitService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000213 /* HealthKitService.swift */; };
+		5D1000000000000000000114 /* SyncEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000214 /* SyncEngine.swift */; };
+		5D1000000000000000000115 /* WHOOPHealthSyncCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5D1000000000000000000902 /* WHOOPHealthSyncCore */; };
+		5D1000000000000000000116 /* HealthKitSampleFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000216 /* HealthKitSampleFactory.swift */; };
+		5D1000000000000000000118 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000218 /* PrivacyInfo.xcprivacy */; };
+		5D1000000000000000000119 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000219 /* Assets.xcassets */; };
+		5D1000000000000000000120 /* LiveSyncRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000220 /* LiveSyncRuntime.swift */; };
+		5D1000000000000000000121 /* SynchronizeWhoopIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000221 /* SynchronizeWhoopIntent.swift */; };
+		5D1000000000000000000122 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000222 /* AppRootView.swift */; };
+		5D1000000000000000000123 /* OptionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000223 /* OptionsView.swift */; };
+		5D1000000000000000000124 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000508 /* Localizable.strings */; };
+		5D1000000000000000000125 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000509 /* InfoPlist.strings */; };
+		5D1000000000000000000126 /* HealthKitRecoveryAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D1000000000000000000228 /* HealthKitRecoveryAdapter.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		5D1000000000000000000201 /* WHOOPHealthSyncApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WHOOPHealthSyncApp.swift; sourceTree = "<group>"; };
+		5D1000000000000000000202 /* AppLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLog.swift; sourceTree = "<group>"; };
+		5D1000000000000000000203 /* SyncViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncViewModel.swift; sourceTree = "<group>"; };
+		5D1000000000000000000204 /* SyncDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncDashboardView.swift; sourceTree = "<group>"; };
+		5D1000000000000000000205 /* AuthenticationSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthenticationSheet.swift; sourceTree = "<group>"; };
+		5D1000000000000000000206 /* SyncModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncModels.swift; sourceTree = "<group>"; };
+		5D1000000000000000000207 /* SyncRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncRepository.swift; sourceTree = "<group>"; };
+		5D1000000000000000000208 /* MetadataKeys.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetadataKeys.swift; sourceTree = "<group>"; };
+		5D1000000000000000000209 /* KeychainTokenStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainTokenStore.swift; sourceTree = "<group>"; };
+		5D1000000000000000000210 /* WhoopAuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopAuthService.swift; sourceTree = "<group>"; };
+		5D1000000000000000000211 /* WhoopAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhoopAPIClient.swift; sourceTree = "<group>"; };
+		5D1000000000000000000213 /* HealthKitService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitService.swift; sourceTree = "<group>"; };
+		5D1000000000000000000214 /* SyncEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncEngine.swift; sourceTree = "<group>"; };
+		5D1000000000000000000215 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		5D1000000000000000000216 /* HealthKitSampleFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitSampleFactory.swift; sourceTree = "<group>"; };
+		5D1000000000000000000217 /* WHOOPHealthSync.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WHOOPHealthSync.entitlements; sourceTree = "<group>"; };
+		5D1000000000000000000218 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		5D1000000000000000000219 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		5D1000000000000000000220 /* LiveSyncRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSyncRuntime.swift; sourceTree = "<group>"; };
+		5D1000000000000000000221 /* SynchronizeWhoopIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SynchronizeWhoopIntent.swift; sourceTree = "<group>"; };
+		5D1000000000000000000222 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
+		5D1000000000000000000223 /* OptionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OptionsView.swift; sourceTree = "<group>"; };
+		5D1000000000000000000224 /* Localizable.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		5D1000000000000000000225 /* Localizable.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = Localizable.strings; path = es.lproj/Localizable.strings; sourceTree = "<group>"; };
+		5D1000000000000000000226 /* InfoPlist.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = InfoPlist.strings; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		5D1000000000000000000227 /* InfoPlist.strings */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = InfoPlist.strings; path = es.lproj/InfoPlist.strings; sourceTree = "<group>"; };
+		5D1000000000000000000301 /* WHOOPHealthSync.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WHOOPHealthSync.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5D1000000000000000000228 /* HealthKitRecoveryAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitRecoveryAdapter.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5D1000000000000000000401 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5D1000000000000000000115 /* WHOOPHealthSyncCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		5D1000000000000000000501 = {
+			isa = PBXGroup;
+			children = (
+				5D1000000000000000000502 /* WHOOPHealthSync */,
+				5D2000000000000000000105,
+				5D2000000000000000000205,
+				5D1000000000000000000503 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		5D1000000000000000000502 /* WHOOPHealthSync */ = {
+			isa = PBXGroup;
+			children = (
+				5D1000000000000000000201 /* WHOOPHealthSyncApp.swift */,
+				5D1000000000000000000202 /* AppLog.swift */,
+				5D1000000000000000000504 /* UI */,
+				5D1000000000000000000507 /* Intents */,
+				5D1000000000000000000505 /* Services */,
+				5D1000000000000000000506 /* Persistence */,
+				5D1000000000000000000215 /* Info.plist */,
+				5D1000000000000000000217 /* WHOOPHealthSync.entitlements */,
+				5D1000000000000000000218 /* PrivacyInfo.xcprivacy */,
+				5D1000000000000000000219 /* Assets.xcassets */,
+				5D1000000000000000000508 /* Localizable.strings */,
+				5D1000000000000000000509 /* InfoPlist.strings */,
+			);
+			path = WHOOPHealthSync;
+			sourceTree = "<group>";
+		};
+		5D1000000000000000000503 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				5D2000000000000000000104,
+				5D2000000000000000000204,
+				5D1000000000000000000301 /* WHOOPHealthSync.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		5D1000000000000000000504 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				5D1000000000000000000222 /* AppRootView.swift */,
+				5D1000000000000000000203 /* SyncViewModel.swift */,
+				5D1000000000000000000204 /* SyncDashboardView.swift */,
+				5D1000000000000000000223 /* OptionsView.swift */,
+				5D1000000000000000000205 /* AuthenticationSheet.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		5D1000000000000000000505 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				5D1000000000000000000208 /* MetadataKeys.swift */,
+				5D1000000000000000000209 /* KeychainTokenStore.swift */,
+				5D1000000000000000000210 /* WhoopAuthService.swift */,
+				5D1000000000000000000211 /* WhoopAPIClient.swift */,
+				5D1000000000000000000228 /* HealthKitRecoveryAdapter.swift */,
+				5D1000000000000000000213 /* HealthKitService.swift */,
+				5D1000000000000000000214 /* SyncEngine.swift */,
+				5D1000000000000000000216 /* HealthKitSampleFactory.swift */,
+				5D1000000000000000000220 /* LiveSyncRuntime.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		5D1000000000000000000506 /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				5D1000000000000000000206 /* SyncModels.swift */,
+				5D1000000000000000000207 /* SyncRepository.swift */,
+			);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
+		5D1000000000000000000507 /* Intents */ = {
+			isa = PBXGroup;
+			children = (
+				5D1000000000000000000221 /* SynchronizeWhoopIntent.swift */,
+			);
+			path = Intents;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXVariantGroup section */
+		5D1000000000000000000508 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				5D1000000000000000000224 /* Localizable.strings */,
+				5D1000000000000000000225 /* Localizable.strings */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+		5D1000000000000000000509 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				5D1000000000000000000226 /* InfoPlist.strings */,
+				5D1000000000000000000227 /* InfoPlist.strings */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin PBXNativeTarget section */
+		5D1000000000000000000601 /* WHOOPHealthSync */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5D1000000000000000000802 /* Build configuration list for PBXNativeTarget "WHOOPHealthSync" */;
+			buildPhases = (
+				5D1000000000000000000701 /* Sources */,
+				5D1000000000000000000401 /* Frameworks */,
+				5D1000000000000000000702 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WHOOPHealthSync;
+			packageProductDependencies = (
+				5D1000000000000000000902 /* WHOOPHealthSyncCore */,
+			);
+			productName = WHOOPHealthSync;
+			productReference = 5D1000000000000000000301 /* WHOOPHealthSync.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		5D1000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					5D1000000000000000000601 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = 5D1000000000000000000801 /* Build configuration list for PBXProject "WHOOPHealthSync" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				es,
+				Base,
+			);
+			mainGroup = 5D1000000000000000000501;
+			packageReferences = (
+				5D1000000000000000000901 /* XCLocalSwiftPackageReference ".." */,
+			);
+			productRefGroup = 5D1000000000000000000503 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				5D2000000000000000000201,
+				5D2000000000000000000101,
+				5D1000000000000000000601 /* WHOOPHealthSync */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		5D1000000000000000000702 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5D1000000000000000000118 /* PrivacyInfo.xcprivacy in Resources */,
+				5D1000000000000000000119 /* Assets.xcassets in Resources */,
+				5D1000000000000000000124 /* Localizable.strings in Resources */,
+				5D1000000000000000000125 /* InfoPlist.strings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		5D1000000000000000000701 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5D1000000000000000000101 /* WHOOPHealthSyncApp.swift in Sources */,
+				5D1000000000000000000102 /* AppLog.swift in Sources */,
+				5D1000000000000000000103 /* SyncViewModel.swift in Sources */,
+				5D1000000000000000000104 /* SyncDashboardView.swift in Sources */,
+				5D1000000000000000000105 /* AuthenticationSheet.swift in Sources */,
+				5D1000000000000000000106 /* SyncModels.swift in Sources */,
+				5D1000000000000000000107 /* SyncRepository.swift in Sources */,
+				5D1000000000000000000108 /* MetadataKeys.swift in Sources */,
+				5D1000000000000000000109 /* KeychainTokenStore.swift in Sources */,
+				5D1000000000000000000110 /* WhoopAuthService.swift in Sources */,
+				5D1000000000000000000111 /* WhoopAPIClient.swift in Sources */,
+				5D1000000000000000000113 /* HealthKitService.swift in Sources */,
+				5D1000000000000000000126 /* HealthKitRecoveryAdapter.swift in Sources */,
+				5D1000000000000000000114 /* SyncEngine.swift in Sources */,
+				5D1000000000000000000116 /* HealthKitSampleFactory.swift in Sources */,
+				5D1000000000000000000120 /* LiveSyncRuntime.swift in Sources */,
+				5D1000000000000000000121 /* SynchronizeWhoopIntent.swift in Sources */,
+				5D1000000000000000000122 /* AppRootView.swift in Sources */,
+				5D1000000000000000000123 /* OptionsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		5D1000000000000000000803 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		5D1000000000000000000804 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		5D1000000000000000000805 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = WHOOPHealthSync/WHOOPHealthSync.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 6;
+				DEVELOPMENT_TEAM = 23W74CFVAM;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WHOOPHealthSync/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.2.0;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) WHOOP_IOS27_SDK";
+				PRODUCT_BUNDLE_IDENTIFIER = com.joselourido.WHOOPHealthSync;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		5D1000000000000000000806 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = WHOOPHealthSync/WHOOPHealthSync.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 6;
+				DEVELOPMENT_TEAM = 23W74CFVAM;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = WHOOPHealthSync/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.2.0;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) WHOOP_IOS27_SDK";
+				PRODUCT_BUNDLE_IDENTIFIER = com.joselourido.WHOOPHealthSync;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5D1000000000000000000801 /* Build configuration list for PBXProject "WHOOPHealthSync" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5D1000000000000000000803 /* Debug */,
+				5D1000000000000000000804 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5D1000000000000000000802 /* Build configuration list for PBXNativeTarget "WHOOPHealthSync" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5D1000000000000000000805 /* Debug */,
+				5D1000000000000000000806 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		5D1000000000000000000901 /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5D1000000000000000000902 /* WHOOPHealthSyncCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5D1000000000000000000901 /* XCLocalSwiftPackageReference ".." */;
+			productName = WHOOPHealthSyncCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+		5D2000000000000000000102 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryHealthKitTests.swift; sourceTree = "<group>"; };
+		5D2000000000000000000103 = {isa = PBXBuildFile; fileRef = 5D2000000000000000000102; };
+		5D2000000000000000000104 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = WHOOPHealthSyncTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		5D2000000000000000000105 = {isa = PBXGroup; children = (5D2000000000000000000102,); path = WHOOPHealthSyncTests; sourceTree = "<group>"; };
+		5D2000000000000000000106 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (5D2000000000000000000103,); runOnlyForDeploymentPostprocessing = 0; };
+		5D2000000000000000000107 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		5D2000000000000000000108 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		5D2000000000000000000113 = {isa = PBXContainerItemProxy; containerPortal = 5D1000000000000000000001; proxyType = 1; remoteGlobalIDString = 5D1000000000000000000601; remoteInfo = WHOOPHealthSync; };
+		5D2000000000000000000112 = {isa = PBXTargetDependency; target = 5D1000000000000000000601; targetProxy = 5D2000000000000000000113; };
+		5D2000000000000000000101 = {isa = PBXNativeTarget; buildConfigurationList = 5D2000000000000000000109; buildPhases = (5D2000000000000000000106,5D2000000000000000000107,5D2000000000000000000108,); buildRules = (); dependencies = (5D2000000000000000000112,); name = WHOOPHealthSyncTests; productName = WHOOPHealthSyncTests; productReference = 5D2000000000000000000104; productType = "com.apple.product-type.bundle.unit-test"; };
+		5D2000000000000000000109 = {isa = XCConfigurationList; buildConfigurations = (5D2000000000000000000110,5D2000000000000000000111,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		5D2000000000000000000110 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; PRODUCT_BUNDLE_IDENTIFIER = com.joselourido.WHOOPHealthSyncTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; SWIFT_ACTIVE_COMPILATION_CONDITIONS = WHOOP_IOS27_SDK; TARGETED_DEVICE_FAMILY = 1; BUNDLE_LOADER = "$(TEST_HOST)"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WHOOPHealthSync.app/WHOOPHealthSync"; }; };
+		5D2000000000000000000111 = {isa = XCBuildConfiguration; name = Release; buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; PRODUCT_BUNDLE_IDENTIFIER = com.joselourido.WHOOPHealthSyncTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; SWIFT_ACTIVE_COMPILATION_CONDITIONS = WHOOP_IOS27_SDK; TARGETED_DEVICE_FAMILY = 1; BUNDLE_LOADER = "$(TEST_HOST)"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/WHOOPHealthSync.app/WHOOPHealthSync"; }; };
+		5D2000000000000000000202 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryUITests.swift; sourceTree = "<group>"; };
+		5D2000000000000000000203 = {isa = PBXBuildFile; fileRef = 5D2000000000000000000202; };
+		5D2000000000000000000204 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = WHOOPHealthSyncUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		5D2000000000000000000205 = {isa = PBXGroup; children = (5D2000000000000000000202,); path = WHOOPHealthSyncUITests; sourceTree = "<group>"; };
+		5D2000000000000000000206 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (5D2000000000000000000203,); runOnlyForDeploymentPostprocessing = 0; };
+		5D2000000000000000000207 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		5D2000000000000000000208 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		5D2000000000000000000213 = {isa = PBXContainerItemProxy; containerPortal = 5D1000000000000000000001; proxyType = 1; remoteGlobalIDString = 5D1000000000000000000601; remoteInfo = WHOOPHealthSync; };
+		5D2000000000000000000212 = {isa = PBXTargetDependency; target = 5D1000000000000000000601; targetProxy = 5D2000000000000000000213; };
+		5D2000000000000000000201 = {isa = PBXNativeTarget; buildConfigurationList = 5D2000000000000000000209; buildPhases = (5D2000000000000000000206,5D2000000000000000000207,5D2000000000000000000208,); buildRules = (); dependencies = (5D2000000000000000000212,); name = WHOOPHealthSyncUITests; productName = WHOOPHealthSyncUITests; productReference = 5D2000000000000000000204; productType = "com.apple.product-type.bundle.ui-testing"; };
+		5D2000000000000000000209 = {isa = XCConfigurationList; buildConfigurations = (5D2000000000000000000210,5D2000000000000000000211,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		5D2000000000000000000210 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; PRODUCT_BUNDLE_IDENTIFIER = com.joselourido.WHOOPHealthSyncUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; SWIFT_ACTIVE_COMPILATION_CONDITIONS = WHOOP_IOS27_SDK; TARGETED_DEVICE_FAMILY = 1; TEST_TARGET_NAME = WHOOPHealthSync; }; };
+		5D2000000000000000000211 = {isa = XCBuildConfiguration; name = Release; buildSettings = {GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; PRODUCT_BUNDLE_IDENTIFIER = com.joselourido.WHOOPHealthSyncUITests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 5.0; SWIFT_ACTIVE_COMPILATION_CONDITIONS = WHOOP_IOS27_SDK; TARGETED_DEVICE_FAMILY = 1; TEST_TARGET_NAME = WHOOPHealthSync; }; };
+	};
+	rootObject = 5D1000000000000000000001 /* Project object */;
+}

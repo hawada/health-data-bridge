@@ -1,0 +1,2 @@
+"NSHealthShareUsageDescription" = "HealthDataBridge lee sueño y frecuencia cardíaca y, si se configura, HRV de recuperación para evitar importaciones WHOOP solapadas.";
+"NSHealthUpdateUsageDescription" = "HealthDataBridge completa fases de sueño y muestras de frecuencia cardíaca de WHOOP y, opcionalmente al configurarla, HRV de recuperación.";

@@ -1,0 +1,30 @@
+# Swift and Xcode build output
+.build/
+.swiftpm/
+DerivedData/
+build/
+*.xcresult
+*.xcarchive
+*.ipa
+*.dSYM/
+# Per-user Xcode state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+# Private local diagnostics, evidence and backups
+outputs/
+.env
+.env.*
+!.env.example
+*.mobileprovision
+*.provisionprofile
+*.p12
+*.p8
+*.pem
+*.key
+*.log
+sync-store.json*
+.DS_Store
+# Machine-specific runtime installation helper
+scripts/finish_ios27_runtime_install.sh
