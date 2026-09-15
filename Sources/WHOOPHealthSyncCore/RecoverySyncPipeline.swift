@@ -105,6 +105,8 @@ public enum RecoveryRunMode: Sendable { case recent, history }
                 default: throw error
                 }
             }
+            // A resumed explicit import must not write new records beyond its fixed cutoff.
+            guard item.representedDate <= now else { continue }
             try await processBatch([item], state: &state, access: access, now: now)
             seen.insert(item.identifier)
             if state.pausedForNativeExport { return lastSummary }
@@ -118,7 +120,7 @@ public enum RecoveryRunMode: Sendable { case recent, history }
                 if state.pausedForNativeExport { return lastSummary }
             }
             try await checkActive(accountKey: accountKey)
-            state.lastDiscoveryEnd = now
+            state.lastDiscoveryEnd = max(state.lastDiscoveryEnd ?? now, now)
             try commitProgress(&state)
             lastSummary.recentCompleted = true
         } else if !state.initialEnumerationComplete {

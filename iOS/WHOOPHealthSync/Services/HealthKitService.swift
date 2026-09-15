@@ -2,6 +2,28 @@ import Foundation
 import HealthKit
 import WHOOPHealthSyncCore
 
+struct RecoveryHealthSource: Identifiable, Equatable {
+    var name: String
+    var bundle: String
+    var id: String { bundle }
+}
+
+struct RecoveryAuthorization {
+    var sources: [RecoveryHealthSource]
+    var access: HealthReadAccess
+    var writeAuthorized = true
+}
+
+struct SyncDataAuthorization {
+    var sleepWriteAuthorized: Bool
+    var heartRateWriteAuthorized: Bool
+    // nil means unknown, never full-read authorization.
+    var sleepReadBoundary: Date?
+    var heartRateReadBoundary: Date?
+    var recovery: RecoveryAuthorization?
+    var baseWriteAuthorized: Bool { sleepWriteAuthorized && heartRateWriteAuthorized }
+}
+
 struct HealthKitSleepSampleRecord {
     var sample: HKCategorySample
     var existing: ExistingSleepSample
@@ -39,12 +61,31 @@ final class HealthKitService {
     }
 
     func requestAuthorization() async throws {
+        try await requestAuthorization(includeRecovery: false)
+    }
+
+    func requestAuthorization(includeRecovery: Bool) async throws {
+        let result = try await requestSelectedAuthorization(includeRecovery: includeRecovery)
+        var denied: [String] = []
+        if !result.sleepWriteAuthorized { denied.append("Sleep Analysis") }
+        if !result.heartRateWriteAuthorized { denied.append("Heart Rate") }
+        if !denied.isEmpty { throw HealthKitSyncError.writeAuthorizationDenied(denied) }
+    }
+
+    func requestSelectedAuthorization(includeRecovery: Bool) async throws -> SyncDataAuthorization {
         guard HKHealthStore.isHealthDataAvailable() else {
             throw HealthKitSyncError.healthDataUnavailable
         }
 
-        let shareTypes: Set<HKSampleType> = [sleepType, heartRateType]
-        let readTypes: Set<HKObjectType> = [sleepType, heartRateType]
+        var shareTypes: Set<HKSampleType> = [sleepType, heartRateType]
+        var readTypes: Set<HKObjectType> = [sleepType, heartRateType]
+        #if WHOOP_IOS27_SDK && os(iOS)
+        if #available(iOS 27, *), includeRecovery,
+           let recovery = HKObjectType.quantityType(forIdentifier: .heartRateVariabilityRMSSD) {
+            shareTypes.insert(recovery)
+            readTypes.insert(recovery)
+        }
+        #endif
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             store.requestAuthorization(toShare: shareTypes, read: readTypes) { success, error in
@@ -59,11 +100,11 @@ final class HealthKitService {
                 continuation.resume()
             }
         }
-        try Self.validateWriteAuthorization(
-            sleepStatus: store.authorizationStatus(for: sleepType),
-            heartRateStatus: store.authorizationStatus(for: heartRateType)
-        )
-        AppLog.healthKit.info("HealthKit authorization request completed with required write permissions.")
+        return SyncDataAuthorization(
+            sleepWriteAuthorized: store.authorizationStatus(for: sleepType) == .sharingAuthorized,
+            heartRateWriteAuthorized: store.authorizationStatus(for: heartRateType) == .sharingAuthorized,
+            sleepReadBoundary: try await authorizedBoundary(for: "sleep"),
+            heartRateReadBoundary: try await authorizedBoundary(for: "heartRate"), recovery: nil)
     }
 
     func validateExistingAuthorization() throws {

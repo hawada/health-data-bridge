@@ -4,6 +4,34 @@ import WHOOPHealthSyncCore
 @testable import WHOOPHealthSync
 
 final class RecoveryHealthKitTests: XCTestCase {
+    @MainActor func testUnifiedSetupAtomicNativeSaveAndRollback() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("setup-native-\(UUID())")
+        let url = directory.appendingPathComponent("sync-store.json")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repo = SyncRepository(fileURL: url)
+        var state = RecoverySyncState(); state.accountKey = "synthetic-account"
+        state.enabled = true; state.configured = true
+        state.historyStartDate = Date(timeIntervalSince1970: 1_000_000)
+        try repo.saveSyncSetup(recovery: state, accountKey: state.accountKey)
+        let bytes = try Data(contentsOf: url)
+        let relaunched = SyncRepository(fileURL: url)
+        XCTAssertTrue(relaunched.hasCompletedSyncSetup); XCTAssertEqual(try relaunched.recoveryState(), state)
+        let failing = SyncRepository(fileURL: url, writeData: { _, _ in throw SyncRepositoryError.storeWriteFailed })
+        var optOut = state; optOut.enabled = false
+        XCTAssertThrowsError(try failing.saveSyncSetup(recovery: optOut))
+        XCTAssertEqual(try failing.recoveryState(), state); XCTAssertEqual(try Data(contentsOf: url), bytes)
+    }
+
+    @MainActor func testUnreadableRepositoryCannotBeClassifiedAsNewOrOverwriteOriginal() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("unreadable-setup-\(UUID()).json")
+        let bytes = Data("synthetic corrupt fixture".utf8); try bytes.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = SyncRepository(fileURL: url)
+        XCTAssertThrowsError(try repo.ensureUsable()); XCTAssertFalse(repo.hasCompletedSyncSetup)
+        XCTAssertThrowsError(try repo.saveSyncSetup(recovery: RecoverySyncState()))
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+    }
+
     @MainActor func testT02NativeRMSSDTypeUnitDateAndMetadata() throws {
         guard #available(iOS 27, *) else { throw XCTSkip("RMSSD requires iOS 27") }
         guard HKObjectType.quantityType(forIdentifier: .heartRateVariabilityRMSSD) != nil else {

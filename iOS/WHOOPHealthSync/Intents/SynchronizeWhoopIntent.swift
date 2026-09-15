@@ -36,10 +36,22 @@ struct SynchronizeWhoopIntent: AppIntent {
     static func resultText(_ summary: SyncSummary) -> String {
         if usesSpanish {
             let status = summary.errors.isEmpty ? "completada" : "con incidencias"
-            return "Sincronización \(status): fases=\(summary.stagesWritten), FC=\(summary.heartRateWritten), HRV=\(summary.recovery.written), omitidas HRV=\(summary.recovery.skippedExternal), HRV: \(recoveryStatus(summary.recovery.status, spanish: true)), incidencias=\(summary.errors.count)"
+            return "Sincronización \(status): fases=\(summary.stagesWritten), sueño: \(dataStatus(summary.sleepResult, spanish: true)), FC=\(summary.heartRateWritten), FC: \(dataStatus(summary.heartRateResult, spanish: true)), HRV=\(summary.recovery.written), omitidas HRV=\(summary.recovery.skippedExternal), HRV: \(recoveryStatus(summary.recovery.status, spanish: true)), incidencias=\(summary.errors.count)"
         }
         let status = summary.errors.isEmpty ? "completed" : "completed with issues"
-        return "Sync \(status): stages=\(summary.stagesWritten), HR=\(summary.heartRateWritten), HRV=\(summary.recovery.written), skipped HRV=\(summary.recovery.skippedExternal), HRV: \(recoveryStatus(summary.recovery.status, spanish: false)), issues=\(summary.errors.count)"
+        return "Sync \(status): stages=\(summary.stagesWritten), sleep: \(dataStatus(summary.sleepResult, spanish: false)), HR=\(summary.heartRateWritten), HR: \(dataStatus(summary.heartRateResult, spanish: false)), HRV=\(summary.recovery.written), skipped HRV=\(summary.recovery.skippedExternal), HRV: \(recoveryStatus(summary.recovery.status, spanish: false)), issues=\(summary.errors.count)"
+    }
+
+    static func dataStatus(_ status: SyncDataResult, spanish: Bool) -> String {
+        guard spanish else { return status.rawValue }
+        switch status {
+        case .notAttempted: return "sin comprobar"
+        case .noData: return "no se recibieron datos"
+        case .existing: return "ya existían"
+        case .updated: return "muestras añadidas o actualizadas"
+        case .pendingAccess: return "pendiente de comprobar acceso"
+        case .failed: return "no se pudo terminar; reintenta"
+        }
     }
 
     static func recoveryStatus(_ status: RecoveryFlowStatus, spanish: Bool) -> String {

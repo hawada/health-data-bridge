@@ -8,8 +8,8 @@ import UIKit
 struct OptionsView: View {
     @ObservedObject var viewModel: SyncViewModel
     @State private var showsAccountBindingConfirmation = false
-    @State private var showsRecoverySetup = false
     @Binding var appLanguage: AppLanguage
+    @Binding var presentedSheet: SyncSheet?
 
     var body: some View {
         Form {
@@ -30,25 +30,41 @@ struct OptionsView: View {
                     Button("Cancel", role: .cancel) {}
                 }
             }
-            Section("Recovery HRV") {
+            Section("Data to sync") {
+                Label("Sleep", systemImage: "moon.zzz.fill")
+                Label("Heart rate", systemImage: "heart.fill")
+                Text("Recovery HRV")
                 Text(LocalizedStringKey(viewModel.recoveryStatusKey))
                     .accessibilityIdentifier("recovery.status")
                 Text("Imports the HRV measured during the main sleep, not the WHOOP recovery percentage. Subsequent syncs review the last seven days. No daytime readings are generated.")
                     .font(.footnote)
-                Button("Configure recovery HRV") { showsRecoverySetup = true }
-                    .disabled(!viewModel.canConfigureRecovery)
+                Button("Configure sync") { presentedSheet = .configuration }
+                    .disabled(viewModel.isSyncing || viewModel.isAuthenticating || viewModel.isConfiguringRecovery || !isAuthenticated || !viewModel.repositoryAvailable)
                     .accessibilityIdentifier("recovery.configure")
-                Button("Import indicated history") { Task { await viewModel.importRecoveryHistory() } }
-                    .disabled(!viewModel.canImportRecovery)
+            }
+            Section("Historical import") {
+                Text("Import an earlier period for sleep, heart rate and configured HRV. Daily sync and Shortcuts keep their saved progress.")
+                    .font(.footnote)
+                Button("Import an earlier period") { presentedSheet = .history }
+                    .disabled(!viewModel.canImportHistory)
                     .accessibilityIdentifier("recovery.importHistory")
-                if viewModel.isSyncing && viewModel.recoveryState.enabled {
+                if viewModel.hasPendingHistoryImport || (viewModel.recoveryState.initialImportCutoff != nil && !viewModel.recoveryState.historicalResolved) {
+                    if let cutoff = viewModel.historyCutoff {
+                        LabeledContent { Text(cutoff, style: .date) } label: { Text("Fixed history cutoff") }
+                    }
+                    if let remaining = viewModel.pendingHistoryWindow {
+                        LabeledContent { Text(remaining.start, style: .date) } label: { Text("Next historical window") }
+                    }
+                    Text(LocalizedStringKey(viewModel.historyPhase == "recovery" ? "History phase: recovery HRV" : "History phase: sleep and heart rate"))
+                    Button("Resume historical import") { Task { await viewModel.importHistory(start: nil) } }
+                        .disabled(!viewModel.canImportHistory)
+                        .accessibilityIdentifier("history.resume")
+                }
+                if viewModel.isSyncing {
                     ProgressView()
                     LabeledContent("Recovery history pages", value: "\(viewModel.recoveryProgress.pagesConfirmed)")
                     LabeledContent("Recovery HRV written", value: "\(viewModel.recoveryProgress.written)")
                     Button("Stop import") { viewModel.cancelRecoveryImport() }
-                }
-                if viewModel.recoveryState.enabled {
-                    Button("Disable recovery HRV") { viewModel.disableRecovery() }
                 }
             }
 
@@ -133,17 +149,21 @@ struct OptionsView: View {
 
         }
         .navigationTitle("Options")
-        .sheet(isPresented: $showsRecoverySetup) { RecoverySetupView(viewModel: viewModel) }
+    }
+
+    private var isAuthenticated: Bool {
+        if case .authenticated = viewModel.authStatus { return true }; return false
     }
 }
 
-private struct RecoverySetupView: View {
+struct SyncSetupView: View {
     @ObservedObject var viewModel: SyncViewModel
     @Environment(\.dismiss) private var dismiss
-    @State private var start = Calendar.current.date(from: DateComponents(year: 2025, month: 12, day: 1)) ?? Date()
+    @State private var includeRecovery = true
     @State private var fullReading = false
     @State private var nativeExportChecked = false
     @State private var sourceBundle = ""
+    @State private var continuingWithoutRecovery = false
 
     private var needsReadConfirmation: Bool {
         guard let authorization = viewModel.recoveryAuthorization else { return false }
@@ -156,34 +176,55 @@ private struct RecoverySetupView: View {
         return false
     }
     private var ready: Bool {
-        viewModel.canConfigureRecovery && !viewModel.requiresAccountBinding && viewModel.recoveryAuthorization != nil &&
-        !nativeExporter && nativeExportChecked && (!needsReadConfirmation || fullReading)
+        viewModel.dataAuthorizationCompleted && !viewModel.requiresAccountBinding && !viewModel.isConfiguringRecovery &&
+        (!effectiveRecovery || (viewModel.recoveryAuthorization?.writeAuthorized == true &&
+            (nativeExporter || (nativeExportChecked && (!needsReadConfirmation || fullReading)))))
     }
+    private var effectiveRecovery: Bool { includeRecovery && viewModel.supportsRecovery }
     var body: some View {
         NavigationStack {
             Form {
-                Section("Recovery HRV") {
-                    Text("Imports the HRV measured during the main sleep, not the WHOOP recovery percentage. Subsequent syncs review the last seven days. No daytime readings are generated.")
-                    DatePicker("WHOOP history starts", selection: $start, in: ...Date(), displayedComponents: .date)
-                    Text("Select when you started using WHOOP. Completion applies to the indicated period; it does not certify the end of the provider's history.")
+                Section("Data to sync") {
+                    Label("Sleep", systemImage: "moon.zzz.fill")
+                    Label("Heart rate", systemImage: "heart.fill")
+                    Toggle("Recovery HRV", isOn: $includeRecovery)
+                        .disabled(!viewModel.supportsRecovery || viewModel.isConfiguringRecovery)
+                        .accessibilityIdentifier("sync.includeHRV")
+                    if !viewModel.supportsRecovery { Text("Requires iOS 27 and support for RMSSD HRV").foregroundStyle(.secondary) }
+                    Text("Recovery HRV is RMSSD in milliseconds, not WHOOP recovery percentage or SDNN.").font(.footnote)
+                    Text(LocalizedStringKey(viewModel.needsInitialSetup
+                         ? "Your first sync covers the last seven days. Import an earlier period later in Options."
+                         : "Your account, imported data and saved progress are retained. This does not restart history."))
                         .font(.footnote)
                 }
                 Section("Health access") {
-                    Button("Authorize recovery HRV") {
+                    Button("Authorize selected data") {
                         fullReading = false; nativeExportChecked = false
-                        Task { await viewModel.authorizeRecovery() }
+                        Task { await viewModel.authorizeSyncData(includeRecovery: includeRecovery && viewModel.supportsRecovery) }
                     }
-                    .disabled(!viewModel.canConfigureRecovery)
+                    .disabled(viewModel.isConfiguringRecovery || viewModel.isSyncing || viewModel.isAuthenticating)
                     .accessibilityIdentifier("recovery.authorize")
                     if viewModel.isConfiguringRecovery { ProgressView() }
+                    if let authorization = viewModel.selectedDataAuthorization {
+                        if let date = authorization.sleepReadBoundary {
+                            Text("Sleep: reading limited from"); Text(date, style: .date)
+                        }
+                        if let date = authorization.heartRateReadBoundary {
+                            Text("Heart rate: reading limited from"); Text(date, style: .date)
+                        }
+                    }
+                    Text("A completed request does not confirm all Health permissions. Reading may remain unknown. Review this app's data access in Health. Cancelling here cannot undo Apple's permission choices.").font(.footnote)
                     if let authorization = viewModel.recoveryAuthorization {
+                        if !authorization.writeAuthorized {
+                            Text("Recovery HRV writing is not authorized. Review access in Health or continue without HRV.")
+                        }
                         if case let .limited(date) = authorization.access {
                             Text("Health reading is limited from")
                             Text(date, style: .date)
                             Text("Older recoveries remain pending until reading covers their sleep dates.")
                         }
                         if nativeExporter {
-                            Text("WHOOP already writes recovery HRV to Health. Import remains paused to avoid duplicates.")
+                            Text("WHOOP already writes recovery HRV to Health. Continue with sleep and heart rate to avoid duplicates.")
                         } else {
                             if !authorization.sources.isEmpty {
                                 Picker("WHOOP source in Health", selection: $sourceBundle) {
@@ -193,6 +234,7 @@ private struct RecoverySetupView: View {
                             }
                             Toggle("I checked that WHOOP does not already write recovery HRV to Health", isOn: $nativeExportChecked)
                                 .accessibilityIdentifier("recovery.confirmNoNativeExport")
+                            Text("Does WHOOP already save your recovery HRV in Health? Check its data sources to avoid importing it twice. Select only a source you recognize; names alone do not identify WHOOP.").font(.footnote)
                             if needsReadConfirmation {
                                 Text("Health does not reveal denied reading when only this app's data or no data is visible. Check that recovery HRV reading is allowed for all dates in Health before enabling import.")
                                     .font(.footnote)
@@ -200,6 +242,15 @@ private struct RecoverySetupView: View {
                                     .accessibilityIdentifier("recovery.confirmFullReading")
                             }
                         }
+                        Button("Continue with sleep and heart rate") {
+                            continuingWithoutRecovery = true
+                            includeRecovery = false
+                            viewModel.continueSetupWithoutRecovery()
+                        }
+                        .accessibilityIdentifier("sync.continueWithoutHRV")
+                    }
+                    if viewModel.dataAuthorizationCompleted && (!includeRecovery || !viewModel.supportsRecovery) {
+                        Text("Health access requested. HRV can be enabled later in Configure sync.").font(.footnote)
                     }
                 }
                 if viewModel.requiresAccountBinding {
@@ -209,25 +260,72 @@ private struct RecoverySetupView: View {
                     Section { Text(error).foregroundStyle(.red) }
                 }
                 Section {
-                    Button("Enable recovery HRV") {
+                    Button(LocalizedStringKey(viewModel.needsInitialSetup ? "Save and sync" : "Save configuration")) {
                         Task {
-                            if await viewModel.enableRecovery(start: Calendar.current.startOfDay(for: start),
+                            let firstSetup = viewModel.needsInitialSetup
+                            if await viewModel.completeSyncSetup(includeRecovery: effectiveRecovery,
                                 fullReadConfirmed: needsReadConfirmation && fullReading,
-                                whoopBundle: sourceBundle.isEmpty ? nil : sourceBundle) { dismiss() }
+                                whoopBundle: sourceBundle.isEmpty ? nil : sourceBundle) {
+                                dismiss()
+                                if firstSetup { await viewModel.synchronize() }
+                            }
                         }
                     }
                     .disabled(!ready)
                     .accessibilityIdentifier("recovery.enable")
                 }
             }
-            .navigationTitle("Configure recovery HRV")
+            .navigationTitle("Configure sync")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .interactiveDismissDisabled(viewModel.isConfiguringRecovery)
-            .onAppear { if let saved = viewModel.recoveryState.historyStartDate { start = saved } }
-            .onChange(of: viewModel.recoveryAuthorization?.sources) { _, sources in
-                let whoop = sources?.filter { $0.name.caseInsensitiveCompare("WHOOP") == .orderedSame } ?? []
-                if whoop.count == 1 { sourceBundle = whoop[0].bundle }
+            .onAppear {
+                includeRecovery = viewModel.supportsRecovery && (viewModel.needsInitialSetup || viewModel.recoveryState.enabled)
+                sourceBundle = viewModel.recoveryState.officialWhoopBundle ?? ""
+                viewModel.resetSetupAuthorization()
             }
+            .onChange(of: includeRecovery) { _, _ in
+                if continuingWithoutRecovery { continuingWithoutRecovery = false }
+                else { viewModel.resetSetupAuthorization() }
+                fullReading = false; nativeExportChecked = false; sourceBundle = ""
+            }
+            .onChange(of: sourceBundle) { _, _ in
+                fullReading = false; nativeExportChecked = false
+            }
+        }
+    }
+}
+
+struct HistoryImportView: View {
+    @ObservedObject var viewModel: SyncViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var start = Calendar.current.startOfDay(for: Date().addingTimeInterval(-30 * 86400))
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Historical import") {
+                    DatePicker("Import from", selection: $start, in: ...Date(), displayedComponents: .date)
+                    Text("Imports the indicated period up to now for sleep, heart rate and configured HRV. Existing data is checked before writing. Completion does not certify all WHOOP history.")
+                        .font(.footnote)
+                    Text("Daily sync keeps its checkpoints. You can stop this import and resume it in Options.")
+                        .font(.footnote)
+                    if let saved = viewModel.recoveryState.historyStartDate, saved < start {
+                        Text("Existing wider HRV history is retained. Any pending HRV work can include that earlier period.")
+                            .font(.footnote)
+                    }
+                }
+                Section {
+                    Button("Import indicated history") {
+                        let date = Calendar.current.startOfDay(for: start)
+                        dismiss()
+                        Task { await viewModel.importHistory(start: date) }
+                    }
+                    .disabled(!viewModel.canImportHistory)
+                    .accessibilityIdentifier("history.start")
+                }
+            }
+            .navigationTitle("Historical import")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
     }
 }

@@ -11,7 +11,14 @@ struct SyncViewModelSmokeCheck {
         try await testDiagnosticsReportIsOperationalAndSanitized()
         try await testLegacyAccountConfirmationBlocksSyncAndRetainsProgress()
         try await testRecoveryConfigurationAndDedicatedImport()
-        print("SyncViewModel smoke check passed (account confirmation, recovery setup, failed authorization and dedicated import)")
+        try await testUnifiedFreshSetupAndSevenDayDefault()
+        try await testExistingInstallationSkipsSetupAndPreservesRecovery()
+        try await testUnifiedSetupCanSkipUnavailableHRV()
+        try await testUnifiedHistoryUsesOneRunnerAndClearsFailure()
+        try await testCorruptStoreNeverStartsOnboarding()
+        try await testPartialAuthorizationAndSelectionInvalidation()
+        try await testAtomicSetupFailureAndDuplicateSave()
+        print("SyncViewModel smoke check passed (13 scenarios: unified setup, corrupt-store gate, partial authorization, atomic rollback, duplicate-save guard, continuity and history)")
     }
 
     @MainActor
@@ -227,6 +234,211 @@ struct SyncViewModelSmokeCheck {
     private static func date(_ seconds: TimeInterval) -> Date {
         Date(timeIntervalSince1970: seconds)
     }
+
+    @MainActor
+    private static func testUnifiedFreshSetupAndSevenDayDefault() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("unified-setup-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = SyncRepository(fileURL: url)
+        let runner = UnifiedSyncRunner()
+        let recovery = FakeRecoveryConfigurator(repository: repo)
+        let vm = SyncViewModel(healthKitService: FakeHealthKitAuthorizer(), repository: repo, syncEngine: runner, recoveryConfigurator: recovery,
+            initialAuthStatus: .authenticated(email: "new@example.invalid"))
+        vm.configure()
+        expect(vm.needsInitialSetup, "Fresh authenticated installation needs combined setup.")
+        let premature = await vm.completeSyncSetup(includeRecovery: true, fullReadConfirmed: true, whoopBundle: nil)
+        expect(!premature, "Setup cannot finish before authorization.")
+        runner.authorizationError = RecoverySyncError.readUnverified
+        await vm.authorizeSyncData(includeRecovery: true)
+        expect(!vm.dataAuthorizationCompleted && vm.needsInitialSetup, "Failed authorization retains setup.")
+        runner.authorizationError = nil
+        let before = try repo.recoveryState()
+        await vm.authorizeSyncData(includeRecovery: true)
+        let after = try repo.recoveryState()
+        expect(before == after && runner.authorizations == [true, true], "A single combined authorization must not mutate saved HRV state.")
+        let now = date(2_000_000)
+        let saved = await vm.completeSyncSetup(includeRecovery: true, fullReadConfirmed: true, whoopBundle: nil, now: now)
+        let state = try repo.recoveryState()
+        expect(saved && !vm.needsInitialSetup && state.enabled, "One setup enables the configured data.")
+        expect(vm.recoveryResultKey(RecoverySyncSummary()) == "Not checked", "A base-phase failure must not misreport configured, unattempted HRV as disabled.")
+        expect(state.historyStartDate == now.addingTimeInterval(-7 * 86400), "Fresh HRV starts at seven days, not a maintainer-specific date.")
+        await vm.synchronize()
+        expect(runner.syncs == 1 && recovery.imports == 0, "Daily sync uses the common runner, not historical import.")
+        let relaunched = SyncViewModel(repository: SyncRepository(fileURL: url), syncEngine: runner,
+            initialAuthStatus: .authenticated(email: "new@example.invalid"))
+        relaunched.configure()
+        expect(!relaunched.needsInitialSetup, "Setup decision survives a relaunch.")
+    }
+
+    @MainActor
+    private static func testExistingInstallationSkipsSetupAndPreservesRecovery() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("unified-existing-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = SyncRepository(fileURL: url)
+        try repo.bindAccountManually("setup-account")
+        try repo.setSleepCheckpoint(date(1_900_000)); try repo.setHeartRateCheckpoint(date(1_900_000), resolution: 60)
+        var state = RecoverySyncState()
+        state.accountKey = "setup-account"; state.enabled = true; state.configured = true
+        state.historyStartDate = date(1); state.initialImportCutoff = date(1_800_000)
+        state.lastDiscoveryEnd = date(1_900_000); state.initialEnumerationComplete = true
+        state.historicalPagesConfirmed = 100; state.confirmedCursorFingerprints = ["saved-cursor"]
+        state.userConfirmedFullReadAccess = true; state.historyScopeLimited = true
+        try repo.commitRecoveryState(state)
+        let runner = UnifiedSyncRunner()
+        let config = FakeRecoveryConfigurator(repository: repo)
+        let vm = SyncViewModel(healthKitService: FakeHealthKitAuthorizer(), repository: repo, syncEngine: runner, recoveryConfigurator: config,
+            initialAuthStatus: .authenticated(email: "existing@example.invalid"))
+        vm.configure()
+        expect(!vm.needsInitialSetup, "Existing state bypasses setup without requiring a new persisted marker.")
+        await vm.synchronize()
+        expect(runner.authorizations.isEmpty && runner.syncs == 1, "Existing daily flow does not ask for new setup.")
+        let originalProgress = try repo.checkpoints()
+        vm.resetSetupAuthorization()
+        await vm.authorizeSyncData(includeRecovery: true)
+        vm.resetSetupAuthorization() // Cancel the editor.
+        let afterCancel = try repo.recoveryState()
+        expect(afterCancel == state, "Opening, authorizing and cancelling setup preserves history and confirmations.")
+        await vm.authorizeSyncData(includeRecovery: true)
+        let saved = await vm.completeSyncSetup(includeRecovery: true, fullReadConfirmed: true, whoopBundle: nil, now: date(3_000_000))
+        let afterSave = try repo.recoveryState()
+        let progress = try repo.checkpoints()
+        expect(saved && afterSave == state && progress == originalProgress, "Saving unchanged configuration never resets the historical start/cutoff/cursors/checkpoints.")
+    }
+
+    @MainActor
+    private static func testUnifiedSetupCanSkipUnavailableHRV() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("unified-skip-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = SyncRepository(fileURL: url)
+        let runner = UnifiedSyncRunner()
+        let config = FakeRecoveryConfigurator(repository: repo); config.recoveryAvailable = false
+        let vm = SyncViewModel(repository: repo, syncEngine: runner, recoveryConfigurator: config,
+            initialAuthStatus: .authenticated(email: "new@example.invalid"))
+        vm.configure()
+        await vm.authorizeSyncData(includeRecovery: false)
+        let saved = await vm.completeSyncSetup(includeRecovery: false, fullReadConfirmed: false, whoopBundle: nil)
+        expect(saved && !vm.needsInitialSetup && !vm.recoveryState.enabled, "No HRV support does not block sleep/heart-rate setup.")
+        expect(runner.authorizations == [false], "Opt-out requests only the supported data.")
+    }
+
+    @MainActor
+    private static func testUnifiedHistoryUsesOneRunnerAndClearsFailure() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("unified-history-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = SyncRepository(fileURL: url); try repo.completeSyncSetup()
+        let runner = UnifiedSyncRunner()
+        let vm = SyncViewModel(repository: repo, syncEngine: runner,
+            initialAuthStatus: .authenticated(email: "owner@example.invalid"))
+        vm.configure()
+        await vm.importHistory(start: date(1))
+        expect(runner.historyStarts.count == 1 && runner.historyStarts[0] == date(1), "One common historical action passes the requested start.")
+        expect(vm.lastSummary?.recovery.written == 1 && runner.syncs == 0, "Common history publishes all data in one summary, independently of daily sync.")
+        runner.historyError = CancellationError()
+        await vm.importHistory(start: nil)
+        expect(vm.lastSummary == nil && vm.errors.isEmpty && !vm.isSyncing, "Cancelled history clears stale summary and busy state without a spurious error.")
+    }
+
+    @MainActor private static func testCorruptStoreNeverStartsOnboarding() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("corrupt-setup-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let bytes = Data("not a repository".utf8); try bytes.write(to: url)
+        let runner = UnifiedSyncRunner()
+        let vm = SyncViewModel(healthKitService: FakeHealthKitAuthorizer(), repository: SyncRepository(fileURL: url),
+            syncEngine: runner, initialAuthStatus: .authenticated(email: "fixture@example.invalid"))
+        vm.configure()
+        expect(!vm.needsInitialSetup && !vm.repositoryAvailable && !vm.errors.isEmpty, "Unreadable state must be blocked, not classified as a fresh installation.")
+        await vm.authorizeSyncData(includeRecovery: false)
+        await vm.synchronize()
+        expect(runner.syncs == 0 && runner.authorizations.isEmpty, "Corruption blocks authorization and runtime execution.")
+        let after = try Data(contentsOf: url)
+        expect(after == bytes, "Corrupt file is preserved exactly.")
+    }
+
+    @MainActor private static func testPartialAuthorizationAndSelectionInvalidation() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("partial-setup-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = SyncRepository(fileURL: url); let runner = UnifiedSyncRunner()
+        let config = FakeRecoveryConfigurator(repository: repo)
+        let vm = SyncViewModel(repository: repo, syncEngine: runner, recoveryConfigurator: config,
+            initialAuthStatus: .authenticated(email: "fixture@example.invalid")); vm.configure()
+        runner.authorizationResult = SyncDataAuthorization(sleepWriteAuthorized: true, heartRateWriteAuthorized: true,
+            sleepReadBoundary: nil, heartRateReadBoundary: nil,
+            recovery: RecoveryAuthorization(sources: [], access: .unknown, writeAuthorized: false))
+        await vm.authorizeSyncData(includeRecovery: true)
+        expect(vm.dataAuthorizationCompleted, "HRV denial must retain the completed base authorization request.")
+        let denied = await vm.completeSyncSetup(includeRecovery: true, fullReadConfirmed: true, whoopBundle: nil)
+        expect(!denied && !repo.hasCompletedSyncSetup, "HRV write denial cannot enable the engine or commit setup.")
+        vm.continueSetupWithoutRecovery()
+        let skipped = await vm.completeSyncSetup(includeRecovery: false, fullReadConfirmed: false, whoopBundle: nil)
+        expect(skipped && !vm.recoveryState.enabled, "Continue without HRV works with already-requested base authorization.")
+        vm.resetSetupAuthorization()
+        let invalidated = await vm.completeSyncSetup(includeRecovery: true, fullReadConfirmed: true, whoopBundle: nil)
+        expect(!invalidated, "A selection change invalidates its temporary validation.")
+        runner.authorizationResult?.heartRateWriteAuthorized = false
+        await vm.authorizeSyncData(includeRecovery: false)
+        expect(!vm.dataAuthorizationCompleted && !vm.errors.isEmpty, "Base denial identifies why first sync cannot start.")
+        runner.authorizationResult?.heartRateWriteAuthorized = true
+        runner.authorizationResult?.recovery = RecoveryAuthorization(sources: [], access: .limited(since: date(100)), writeAuthorized: true)
+        await vm.authorizeSyncData(includeRecovery: true)
+        let invented = await vm.completeSyncSetup(includeRecovery: true, fullReadConfirmed: true, whoopBundle: "com.example.unobserved")
+        expect(!invented, "A source identity not actually observed is never accepted.")
+        expect(!HealthReadAccess.limited(since: date(100)).covers(TimeRange(start: date(1), end: date(200))), "Limited reading takes precedence over manual assertions.")
+    }
+
+    @MainActor private static func testAtomicSetupFailureAndDuplicateSave() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("atomic-setup-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let baseline = SyncRepository(fileURL: url); try baseline.bindAccountManually("synthetic-account")
+        let bytes = try Data(contentsOf: url)
+        let failing = SyncRepository(fileURL: url, writeData: { _, _ in throw SyncRepositoryError.storeWriteFailed })
+        let runner = UnifiedSyncRunner(); let config = FakeRecoveryConfigurator(repository: failing)
+        let vm = SyncViewModel(repository: failing, syncEngine: runner, recoveryConfigurator: config,
+            initialAuthStatus: .authenticated(email: "fixture@example.invalid")); vm.configure()
+        await vm.authorizeSyncData(includeRecovery: true)
+        let saved = await vm.completeSyncSetup(includeRecovery: true, fullReadConfirmed: true, whoopBundle: nil)
+        expect(!saved && !vm.setupCompleted && !vm.recoveryState.enabled && runner.syncs == 0, "A failed atomic write rolls back HRV and marker; no sync starts.")
+        let after = try Data(contentsOf: url)
+        expect(after == bytes, "A failed setup save preserves committed bytes.")
+        let repo = SyncRepository(fileURL: url); let delayed = FakeRecoveryConfigurator(repository: repo)
+        delayed.pauseSave = true
+        let guarded = SyncViewModel(repository: repo, syncEngine: runner, recoveryConfigurator: delayed,
+            initialAuthStatus: .authenticated(email: "fixture@example.invalid")); guarded.configure()
+        await guarded.authorizeSyncData(includeRecovery: true)
+        let first = Task { await guarded.completeSyncSetup(includeRecovery: true, fullReadConfirmed: true, whoopBundle: nil) }
+        while delayed.saveContinuation == nil { await Task.yield() }
+        let second = await guarded.completeSyncSetup(includeRecovery: true, fullReadConfirmed: true, whoopBundle: nil)
+        expect(!second && delayed.saveCount == 1, "Repeated save during account/permission validation is rejected before writing.")
+        delayed.saveContinuation?.resume(); delayed.saveContinuation = nil
+        let completed = await first.value
+        expect(completed, "The first save completes once.")
+        expect(!guarded.needsInitialSetup && runner.syncs == 0, "Saving configuration itself does not launch another sync.")
+    }
+}
+
+@MainActor private final class UnifiedSyncRunner: SyncRunning, SyncDataConfiguring, HistoryRunning, SelectedDataAuthorizing {
+    var authorizations: [Bool] = []
+    var authorizationError: Error?
+    var syncs = 0
+    var historyStarts: [Date?] = []
+    var historyError: Error?
+    var authorizationResult: SyncDataAuthorization?
+    func authorizeSelectedData(includeRecovery: Bool) async throws -> SyncDataAuthorization {
+        let recovery = try await authorizeSyncData(includeRecovery: includeRecovery)
+        return authorizationResult ?? SyncDataAuthorization(sleepWriteAuthorized: true, heartRateWriteAuthorized: true,
+            sleepReadBoundary: nil, heartRateReadBoundary: nil, recovery: recovery)
+    }
+    func authorizeSyncData(includeRecovery: Bool) async throws -> RecoveryAuthorization? {
+        authorizations.append(includeRecovery)
+        if let authorizationError { throw authorizationError }
+        return includeRecovery ? RecoveryAuthorization(sources: [], access: .unknown) : nil
+    }
+    func synchronize() async throws -> SyncSummary { syncs += 1; return SyncSummary() }
+    func importHistory(start: Date?) async throws -> SyncSummary {
+        historyStarts.append(start)
+        if let historyError { throw historyError }
+        var summary = SyncSummary(); summary.stagesWritten = 2; summary.heartRateWritten = 3
+        summary.recovery.written = 1; return summary
+    }
 }
 
 private final class FakeHealthKitAuthorizer: HealthKitAuthorizing {
@@ -291,14 +503,28 @@ private final class FakeAccountBinder: AccountBindingProviding {
     }
 }
 
-@MainActor private final class FakeRecoveryConfigurator: RecoveryConfiguring {
+@MainActor private final class FakeRecoveryConfigurator: RecoveryConfiguring, SyncSetupSaving {
     let repository: SyncRepository
     var recoveryAvailable = true
     var authorizationError: Error?
     var configurationError: Error?
     var imports = 0
     var importError: Error?
+    var pauseSave = false
+    var saveCount = 0
+    var saveContinuation: CheckedContinuation<Void, Never>?
     init(repository: SyncRepository) { self.repository = repository }
+    func saveSyncSetup(includeRecovery: Bool, fullReadConfirmed: Bool, whoopBundle: String?, now: Date) async throws {
+        saveCount += 1
+        if pauseSave { await withCheckedContinuation { saveContinuation = $0 } }
+        if let configurationError { throw configurationError }
+        var state = try repository.recoveryState()
+        state.enabled = includeRecovery
+        if includeRecovery {
+            state.configured = true; state.historyStartDate = state.historyStartDate ?? now.addingTimeInterval(-7 * 86400)
+        }
+        try repository.saveSyncSetup(recovery: state)
+    }
     func authorizeRecovery() async throws -> RecoveryAuthorization {
         if let authorizationError { throw authorizationError }
         return RecoveryAuthorization(sources: [], access: .unknown)

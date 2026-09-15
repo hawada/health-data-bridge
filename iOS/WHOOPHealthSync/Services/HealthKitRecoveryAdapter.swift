@@ -9,7 +9,7 @@ final class HealthKitRecoveryAdapter: RecoveryHealthProviding {
     private let manualConfirmation: () -> Bool
     private let officialBundle: () -> String?
     private let appBundle: String
-    init(store: HKHealthStore = HKHealthStore(), appBundle: String = "com.joselourido.WHOOPHealthSync", manualConfirmation: @escaping () -> Bool = { false }, officialBundle: @escaping () -> String? = { nil }) {
+    init(store: HKHealthStore = HKHealthStore(), appBundle: String = Bundle.main.bundleIdentifier ?? "com.joselourido.WHOOPHealthSync", manualConfirmation: @escaping () -> Bool = { false }, officialBundle: @escaping () -> String? = { nil }) {
         self.manualConfirmation = manualConfirmation; self.officialBundle = officialBundle
         self.store = store; self.appBundle = appBundle
     }
@@ -29,6 +29,15 @@ final class HealthKitRecoveryAdapter: RecoveryHealthProviding {
             guard let type else { throw RecoverySyncError.unavailable }
             guard HKHealthStore.isHealthDataAvailable() else { throw HealthKitSyncError.healthDataUnavailable }
             try await store.requestAuthorization(toShare: [type], read: [type])
+            try validateWriteAuthorization()
+            return
+        }
+        #endif
+        throw RecoverySyncError.unavailable
+    }
+    func validateWriteAuthorization() throws {
+        #if WHOOP_IOS27_SDK && os(iOS)
+        if #available(iOS 27, *), let type {
             guard store.authorizationStatus(for: type) == .sharingAuthorized else {
                 throw HealthKitSyncError.writeAuthorizationDenied(["Recovery HRV"])
             }
@@ -151,15 +160,4 @@ final class HealthKitRecoveryAdapter: RecoveryHealthProviding {
         }
     }
     #endif
-}
-
-struct RecoveryHealthSource: Identifiable, Equatable {
-    var name: String
-    var bundle: String
-    var id: String { bundle }
-}
-
-struct RecoveryAuthorization {
-    var sources: [RecoveryHealthSource]
-    var access: HealthReadAccess
 }

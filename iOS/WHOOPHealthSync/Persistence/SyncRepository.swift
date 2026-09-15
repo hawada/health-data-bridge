@@ -25,8 +25,8 @@ final class SyncRepository {
         do {
             self.snapshot = try Self.load(from: self.fileURL)
             let journalURL = self.fileURL.appendingPathExtension("recovery-wal")
-            if FileManager.default.fileExists(atPath: journalURL.path) {
-                let pending = try JSONDecoder().decode([String: RecoveryPendingOperation].self, from: Data(contentsOf: journalURL))
+            if let journal = try Self.readIfPresent(journalURL) {
+                let pending = try JSONDecoder().decode([String: RecoveryPendingOperation].self, from: journal)
                 self.snapshot.recovery.pendingOperations.merge(pending) { _, operation in operation }
             }
             if FileManager.default.fileExists(atPath: self.fileURL.path) {
@@ -43,6 +43,75 @@ final class SyncRepository {
 
     func ensureUsable() throws {
         if let loadError { throw loadError }
+    }
+
+    // Existing installations are recognized from their actual state, not a new onboarding flag.
+    var hasCompletedSyncSetup: Bool {
+        loadError == nil && (state("syncSetupCompleted")?.intValue == 1 || snapshot.recovery.configured ||
+        snapshot.states[Keys.sleepCheckpoint] != nil || snapshot.states[Keys.heartRateCheckpoint] != nil ||
+        requiresManualAccountBinding)
+    }
+
+    /// One protected atomic snapshot, including initial account binding. No intermediate HRV activation.
+    func saveSyncSetup(recovery: RecoverySyncState, accountKey: String? = nil) throws {
+        try ensureUsable()
+        if let key = accountKey {
+            guard !key.isEmpty, snapshot.linkedAccountKey == nil || snapshot.linkedAccountKey == key,
+                  snapshot.recovery.accountKey == nil || snapshot.recovery.accountKey == key else {
+                throw RecoverySyncError.accountMismatch
+            }
+            guard !requiresManualAccountBinding else { throw SyncRepositoryError.accountBindingRequired }
+            snapshot.linkedAccountKey = key
+        }
+        snapshot.recovery = recovery
+        snapshot.states["syncSetupCompleted"] = SyncStateRecord(key: "syncSetupCompleted", intValue: 1)
+        try save()
+    }
+
+    func completeSyncSetup() throws {
+        try ensureUsable()
+        snapshot.states["syncSetupCompleted"] = SyncStateRecord(key: "syncSetupCompleted", intValue: 1)
+        try save()
+    }
+
+    func historyWindow() throws -> TimeRange? {
+        try ensureUsable()
+        guard let start = state("historyNext")?.dateValue, let end = state("historyCutoff")?.dateValue,
+              start < end else { return nil }
+        return TimeRange(start: start, end: end)
+    }
+
+    var hasPendingHistoryImport: Bool { state("historyActive")?.intValue == 1 }
+
+    var historyCutoff: Date? { state("historyCutoff")?.dateValue }
+    var historyPhase: String? { state("historyPhase")?.stringValue }
+
+    func beginHistory(start: Date, cutoff: Date, recovery: RecoverySyncState? = nil) throws {
+        try ensureUsable()
+        guard start < cutoff else { throw RecoverySyncError.invalidRecord }
+        snapshot.states["historyStart"] = SyncStateRecord(key: "historyStart", dateValue: start)
+        snapshot.states["historyNext"] = SyncStateRecord(key: "historyNext", dateValue: start)
+        snapshot.states["historyCutoff"] = SyncStateRecord(key: "historyCutoff", dateValue: cutoff)
+        snapshot.states["historyActive"] = SyncStateRecord(key: "historyActive", intValue: 1)
+        snapshot.states["historyPhase"] = SyncStateRecord(key: "historyPhase", stringValue: "sleepHeartRate")
+        if let recovery { snapshot.recovery = recovery }
+        try save()
+    }
+
+    func advanceHistory(to date: Date) throws {
+        try ensureUsable()
+        snapshot.states["historyNext"] = SyncStateRecord(key: "historyNext", dateValue: date)
+        if date >= (historyCutoff ?? .distantFuture) {
+            snapshot.states["historyPhase"] = SyncStateRecord(key: "historyPhase", stringValue: "recovery")
+        }
+        try save()
+    }
+
+    func finishHistory() throws {
+        try ensureUsable()
+        snapshot.states["historyActive"] = SyncStateRecord(key: "historyActive", intValue: 0)
+        snapshot.states["historyPhase"] = SyncStateRecord(key: "historyPhase", stringValue: "finished")
+        try save()
     }
 
     var requiresManualAccountBinding: Bool {
@@ -382,11 +451,18 @@ final class SyncRepository {
         #endif
     }
 
-    private static func load(from fileURL: URL) throws -> SyncStoreSnapshot {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return .empty
+    private static func readIfPresent(_ fileURL: URL) throws -> Data? {
+        do { return try Data(contentsOf: fileURL) }
+        catch {
+            let failure = error as NSError
+            // fileExists can also be false for an inaccessible protected directory.
+            guard failure.domain == NSCocoaErrorDomain, failure.code == NSFileReadNoSuchFileError else { throw error }
+            return nil
         }
-        let data = try Data(contentsOf: fileURL)
+    }
+
+    private static func load(from fileURL: URL) throws -> SyncStoreSnapshot {
+        guard let data = try readIfPresent(fileURL) else { return .empty }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(SyncStoreSnapshot.self, from: data)

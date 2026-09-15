@@ -6,7 +6,7 @@ Open `iOS/WHOOPHealthSync.xcodeproj` and select its shared scheme. Select your o
 
 ## New users
 
-Choose an available bundle identifier you control. The app target's `PRODUCT_BUNDLE_IDENTIFIER` is substituted into Info.plist. The existing recovery wiring also uses the legacy bundle as an ownership identity in `Services/LiveSyncRuntime.swift` and the default argument in `Services/HealthKitRecoveryAdapter.swift`: adapt those values consistently for your new installation. Do not invent a WHOOP exporter bundle; the app selects an actually observed source when configured.
+Choose an available bundle identifier you control. The app target's `PRODUCT_BUNDLE_IDENTIFIER` is substituted into Info.plist, and recovery ownership uses that running bundle identity automatically. No recovery source-code edits are needed. Do not invent a WHOOP exporter bundle; the app selects an actually observed source when configured.
 
 Example simulator build, without personal signing:
 

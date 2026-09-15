@@ -21,7 +21,11 @@ struct SyncEngineSmokeCheck {
         try await testCancelledSleepDoesNotAdvanceOrContinueHeartRate()
         try await testRecoveryCapabilityGatesPreserveExistingFlows()
         try await testLegacyAccountBindingAndChangedAccountStopBeforeQueries()
-        print("SyncEngine smoke check passed (18 scenarios including account migration, recovery gates, limited access and cancellation)")
+        try await testExplicitHistoryKeepsLiveCheckpointsAndIsIdempotent()
+        try await testCommonHistoryResumesConfirmedChunks()
+        try await testHistoryScopeExpansionIsExplicitAndRetainsRecoveryWork()
+        try await testHistoryRecoveryFailureResumesWithoutReplayingWindows()
+        print("SyncEngine smoke check passed (22 scenarios including explicit history, durable resume and live-checkpoint continuity)")
     }
 
     @MainActor
@@ -110,6 +114,7 @@ struct SyncEngineSmokeCheck {
         expect(summary.stagesWritten == 2, "Partial sync should still write sleep phases.")
         expect(summary.heartRateWritten == 0, "Failed HR save should not count written HR.")
         expect(!summary.errors.isEmpty, "Failed HR save should report a partial error.")
+        expect(summary.sleepResult == .updated && summary.heartRateResult == .failed, "A failed heart-rate phase must not hide confirmed sleep or report an empty successful phase.")
 
         let checkpoints = try repository.checkpoints()
         expect(checkpoints.lastSleepQueryEnd != nil, "Sleep checkpoint should advance after successful sleep pipeline.")
@@ -575,10 +580,130 @@ struct SyncEngineSmokeCheck {
         expect(repo.diagnostics().lastRunStatus == "cancelled", "Cancellation must not appear completed.")
     }
 
+    @MainActor
+    private static func testExplicitHistoryKeepsLiveCheckpointsAndIsIdempotent() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("history-engine-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let now = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+        let repo = SyncRepository(fileURL: url)
+        try repo.bindAccountManually(WhoopRecovery.pseudonymousAccountKey(userID: "fake-user"))
+        try repo.setSleepCheckpoint(now); try repo.setHeartRateCheckpoint(now, resolution: 60)
+        let before = try repo.checkpoints()
+        let deferred = TimeRange(start: now.addingTimeInterval(-86400), end: now)
+        try repo.setDeferredWindow(deferred, for: "sleep"); try repo.setDeferredWindow(deferred, for: "heartRate")
+        let start = now.addingTimeInterval(-40 * 86400)
+        let window = TimeRange(start: start, end: start.addingTimeInterval(86400))
+        let sleep = try makeSleepSession(id: "old-history", start: start.addingTimeInterval(7200))
+        let point = HeartRatePoint(timestamp: start.addingTimeInterval(120), bpm: 61, sourceStepSeconds: 6)
+        let health = FakeHealthData(externalSleep: [], externalHeartRate: [])
+        let engine = SyncEngine(api: FakeWhoopAPI(sleeps: [sleep], heartRatePoints: [point]), healthKit: health, repository: repo)
+        let first = try await engine.synchronize(recoveryMode: .recent, historyWindow: window)
+        expect(first.stagesWritten == sleep.stages.count && first.heartRateWritten == 1, "Explicit history writes older data for both existing data types.")
+        try expect(try repo.checkpoints() == before, "History must not rewind or replace live checkpoints/resolution.")
+        try expect(try repo.deferredWindow(for: "sleep") == deferred && repo.deferredWindow(for: "heartRate") == deferred, "History must not clear unrelated live deferred work.")
+        let second = try await engine.synchronize(recoveryMode: .recent, historyWindow: window)
+        expect(second.stagesWritten == 0 && second.heartRateWritten == 0, "Replaying a history chunk is idempotent.")
+        expect(second.sleepResult == .existing && second.heartRateResult == .existing, "A verified replay reports existing data, not merely zero writes.")
+        health.sleepBoundary = window.end; health.heartRateBoundary = window.end
+        let limited = try await engine.synchronize(recoveryMode: .recent, historyWindow: window)
+        expect(!limited.errors.isEmpty && limited.stagesWritten == 0 && limited.heartRateWritten == 0, "Limited historical access must leave the chunk unresolved.")
+        try expect(try repo.checkpoints() == before && repo.deferredWindow(for: "sleep") == deferred && repo.deferredWindow(for: "heartRate") == deferred, "Limited history must not expand the daily/automation workload.")
+        health.sleepBoundary = window.start.addingTimeInterval(60); health.heartRateBoundary = window.start.addingTimeInterval(60)
+        let emptyEngine = SyncEngine(api: FakeWhoopAPI(sleeps: [], heartRatePoints: []), healthKit: health, repository: repo)
+        let empty = try await emptyEngine.synchronize(recoveryMode: .recent, historyWindow: window)
+        expect(!empty.errors.isEmpty && empty.sleepResult == .pendingAccess && empty.heartRateResult == .pendingAccess,
+            "Even an empty provider response cannot confirm a historical window whose read boundary excludes its start.")
+        try expect(try repo.checkpoints() == before, "Empty limited history preserves live progress.")
+        health.sleepBoundary = nil; health.heartRateBoundary = nil
+        let readableEmpty = try await emptyEngine.synchronize(recoveryMode: .recent, historyWindow: window)
+        expect(readableEmpty.sleepResult == .noData && readableEmpty.heartRateResult == .noData,
+            "An accessible empty provider response is distinct from already-existing samples and pending access.")
+    }
+
+    @MainActor
+    private static func testCommonHistoryResumesConfirmedChunks() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("history-resume-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let now = Date(timeIntervalSince1970: 5_000_000)
+        let start = now.addingTimeInterval(-15 * 86400)
+        var requests: [TimeRange] = []
+        var recoveryCalls = 0
+        let repo = SyncRepository(fileURL: url)
+        let interrupted = HistoryImporter(repository: repo, syncWindow: { window in
+            requests.append(window)
+            if requests.count == 2 { throw CancellationError() }
+            var summary = SyncSummary(); summary.stagesWritten = 1; return summary
+        }, syncRecovery: { recoveryCalls += 1; return RecoverySyncSummary() })
+        do { _ = try await interrupted.run(start: start, now: now); fatalError("Expected interrupted history") }
+        catch is CancellationError {}
+        expect(recoveryCalls == 0 && requests[0].end == start.addingTimeInterval(7 * 86400), "History uses bounded, confirmed chunks before recovery import.")
+        let reloaded = SyncRepository(fileURL: url)
+        try expect(try reloaded.historyWindow()?.start == requests[0].end, "Only confirmed history chunks advance durable progress.")
+        let partial = HistoryImporter(repository: reloaded, syncWindow: { _ in
+            var summary = SyncSummary(); summary.errors = ["Health access pending"]; return summary
+        }, syncRecovery: { recoveryCalls += 1; return RecoverySyncSummary() })
+        _ = try await partial.run(start: nil, now: now.addingTimeInterval(86400))
+        try expect(try reloaded.historyWindow()?.start == requests[0].end, "Partial/failed chunks remain pending.")
+        requests.removeAll()
+        let resumed = HistoryImporter(repository: reloaded, syncWindow: { window in
+            requests.append(window); var summary = SyncSummary(); summary.heartRateWritten = 2; return summary
+        }, syncRecovery: { recoveryCalls += 1; var summary = RecoverySyncSummary(); summary.written = 3; return summary })
+        let result = try await resumed.run(start: nil, now: now.addingTimeInterval(86400))
+        expect(requests.count == 2 && requests.last?.end == now, "Resume retains the original cutoff, not a moving target.")
+        expect(result.heartRateWritten == 4 && result.recovery.written == 3 && recoveryCalls == 1, "One common history result includes all configured data.")
+        try expect(try reloaded.historyWindow() == nil, "Confirmed historical traversal finishes its declared period.")
+    }
+
+    @MainActor
+    private static func testHistoryScopeExpansionIsExplicitAndRetainsRecoveryWork() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("history-scope-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = SyncRepository(fileURL: url)
+        try repo.bindAccountManually("history-account")
+        var state = RecoverySyncState()
+        state.accountKey = "history-account"; state.enabled = true; state.configured = true
+        state.historyStartDate = Date(timeIntervalSince1970: 1_000_000)
+        state.lastDiscoveryEnd = Date(timeIntervalSince1970: 2_000_000)
+        state.initialEnumerationComplete = true; state.initialImportCutoff = state.lastDiscoveryEnd
+        state.historicalPagesConfirmed = 30; state.historicalCursor = "previous-cursor"
+        state.userConfirmedFullReadAccess = true
+        state.pendingItems["pending"] = RecoveryPendingItem(cycleID: "pending", firstDetectedAt: state.lastDiscoveryEnd!, reason: "access")
+        try repo.commitRecoveryState(state)
+        let importer = HistoryImporter(repository: repo, syncWindow: { _ in SyncSummary() }, syncRecovery: { RecoverySyncSummary() })
+        let cutoff = Date(timeIntervalSince1970: 2_000_000)
+        _ = try await importer.run(start: Date(timeIntervalSince1970: 1_500_000), now: cutoff)
+        try expect(try repo.recoveryState() == state, "Requesting later history retains already wider HRV progress.")
+        let earlier = Date(timeIntervalSince1970: 500_000)
+        _ = try await importer.run(start: earlier, now: cutoff)
+        let expanded = try repo.recoveryState()
+        expect(expanded.historyStartDate == earlier && !expanded.initialEnumerationComplete && expanded.historicalCursor == nil, "Only an explicit earlier history request reopens enumeration.")
+        expect(expanded.lastDiscoveryEnd == state.lastDiscoveryEnd && expanded.pendingItems == state.pendingItems && expanded.userConfirmedFullReadAccess, "Scope extension preserves daily progress, pending records and read confirmation.")
+    }
+
     private static func expect(_ condition: @autoclosure () throws -> Bool, _ message: String) rethrows {
         guard try condition() else {
             fatalError(message)
         }
+    }
+
+    @MainActor
+    private static func testHistoryRecoveryFailureResumesWithoutReplayingWindows() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("history-recovery-retry-\(UUID()).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let repo = SyncRepository(fileURL: url)
+        let cutoff = Date(timeIntervalSince1970: 5_000_000)
+        var windows = 0
+        let failing = HistoryImporter(repository: repo, syncWindow: { _ in windows += 1; return SyncSummary() }, syncRecovery: {
+            throw RecoverySyncError.rateLimited(until: cutoff.addingTimeInterval(60))
+        })
+        do { _ = try await failing.run(start: cutoff.addingTimeInterval(-86400), now: cutoff); fatalError("Expected HRV retry") }
+        catch let error as RecoverySyncError { guard case .rateLimited = error else { throw error } }
+        try expect(try repo.historyWindow() == nil && repo.hasPendingHistoryImport, "HRV-stage failure retains the active import after all earlier windows finish.")
+        expect(repo.historyPhase == "recovery" && repo.historyCutoff == cutoff, "The pending phase and fixed cutoff are durable.")
+        let reloaded = SyncRepository(fileURL: url)
+        let resumed = HistoryImporter(repository: reloaded, syncWindow: { _ in windows += 1; return SyncSummary() }, syncRecovery: { RecoverySyncSummary() })
+        _ = try await resumed.run(start: nil, now: cutoff.addingTimeInterval(86400))
+        expect(windows == 1 && !reloaded.hasPendingHistoryImport, "Resume retries only HRV, not confirmed sleep/heart-rate windows.")
     }
 }
 

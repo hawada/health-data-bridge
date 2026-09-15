@@ -3,8 +3,9 @@ import SwiftUI
 
 struct SyncDashboardView: View {
     @ObservedObject var viewModel: SyncViewModel
-    @Binding var showsAuthentication: Bool
+    @Binding var presentedSheet: SyncSheet?
     @Environment(\.locale) private var locale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("shortcutsIntroductionDismissed") private var shortcutsIntroductionDismissed = false
 
     var body: some View {
@@ -24,12 +25,14 @@ struct SyncDashboardView: View {
                         .foregroundStyle(.secondary)
 
                     Button {
-                        if isAuthenticated {
+                        if viewModel.needsInitialSetup {
+                            presentedSheet = .configuration
+                        } else if isAuthenticated {
                             Task {
                                 await viewModel.synchronize()
                             }
                         } else {
-                            showsAuthentication = true
+                            presentedSheet = .authentication
                         }
                     } label: {
                         HStack(spacing: 10) {
@@ -46,7 +49,8 @@ struct SyncDashboardView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
-                    .disabled(viewModel.isSyncing || viewModel.isAuthenticating)
+                    .disabled(viewModel.isSyncing || viewModel.isAuthenticating || !viewModel.repositoryAvailable || viewModel.isConfiguringRecovery)
+                    .accessibilityIdentifier("sync.primary")
                     .accessibilityHint(
                         isAuthenticated
                             ? Text("Fills gaps detected in Apple Health since the last sync")
@@ -54,6 +58,21 @@ struct SyncDashboardView: View {
                     )
                 }
                 .padding(.vertical, 8)
+            }
+
+            if let summary = viewModel.lastSummary {
+                Section("Summary") {
+                    LabeledContent("Stages written", value: "\(summary.stagesWritten)")
+                    LabeledContent { Text(LocalizedStringKey(summary.sleepResult.rawValue)) } label: { Text("Sleep") }
+                    LabeledContent("Already existing sleep", value: "\(summary.sleepsUnchanged)")
+                    LabeledContent("Heart-rate samples written", value: "\(summary.heartRateWritten)")
+                    LabeledContent { Text(LocalizedStringKey(summary.heartRateResult.rawValue)) } label: { Text("Heart rate") }
+                    LabeledContent("Already existing heart rate", value: "\(summary.heartRateSkipped)")
+                    LabeledContent("Recovery HRV written", value: "\(summary.recovery.written)")
+                    Text(LocalizedStringKey(viewModel.recoveryResultKey(summary.recovery)))
+                    LabeledContent("Already existing HRV", value: "\(summary.recovery.unchanged + summary.recovery.skippedExternal)")
+                    LabeledContent("Pending HRV", value: "\(summary.recovery.pending)")
+                }
             }
 
             if !shortcutsIntroductionDismissed {
@@ -100,16 +119,6 @@ struct SyncDashboardView: View {
                 }
             }
 
-            Section("Recovery HRV") {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(LocalizedStringKey(viewModel.recoveryStatusKey))
-                        .accessibilityIdentifier("recovery.dashboard.status")
-                    if let date = viewModel.recoveryState.lastDiscoveryEnd {
-                        Text(dateValue(date)).font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-            }
-
             Section("Last synced data") {
                 lastRunRow
                 syncedDataRow(
@@ -122,6 +131,26 @@ struct SyncDashboardView: View {
                     systemImage: "heart.fill",
                     value: dateValue(viewModel.diagnostics.lastHeartRateCheckpoint)
                 )
+                adaptiveRow {
+                    Label("Recovery HRV", systemImage: "waveform.path.ecg")
+                    if !dynamicTypeSize.isAccessibilitySize { Spacer() }
+                    VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 3) {
+                        Text(LocalizedStringKey(viewModel.recoveryStatusKey))
+                            .accessibilityIdentifier("recovery.dashboard.status")
+                        if let date = viewModel.recoveryState.lastDiscoveryEnd {
+                            Text(dateValue(date)).font(.caption)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+                }
+            }
+
+            if !viewModel.errors.isEmpty {
+                Section("Errors") {
+                    Text("Pending access check or retry").foregroundStyle(.red)
+                    NavigationLink("Activity and diagnostics") { SyncActivityView(viewModel: viewModel) }
+                }
             }
 
         }
@@ -140,14 +169,22 @@ struct SyncDashboardView: View {
         if viewModel.isSyncing {
             return "Sync in progress"
         }
+        if viewModel.needsInitialSetup { return "Set up your data" }
+        if !viewModel.repositoryAvailable { return "Local data unavailable" }
+        if !isAuthenticated && viewModel.setupCompleted { return "Reconnect WHOOP; saved progress retained" }
+        if let summary = viewModel.lastSummary { return summary.errors.isEmpty ? "Sync finished" : "Partial result; review pending data" }
+        if !viewModel.errors.isEmpty || viewModel.diagnostics.lastRunStatus == "failed" || viewModel.diagnostics.lastRunStatus == "partial" { return "Pending access check or retry" }
+        if viewModel.setupCompleted && viewModel.diagnostics.lastRunFinishedAt == nil &&
+            viewModel.diagnostics.lastSleepCheckpoint == nil && viewModel.diagnostics.lastHeartRateCheckpoint == nil { return "Configuration saved; first sync pending" }
         return isAuthenticated ? "Ready to sync" : "Connect WHOOP to get started"
     }
 
     private var syncDescription: LocalizedStringKey {
         if isAuthenticated {
-            return "Adds only missing sleep stages and heart rate samples, without replacing data from other sources."
+            return "Sync sleep, heart rate and authorized HRV together. Only missing data is added; other sources are preserved."
         }
-        return "Authorize WHOOP and Apple Health once; then sync here or from Shortcuts."
+        if viewModel.setupCompleted { return "Your account, imported data and saved progress are retained. This does not restart history." }
+        return "Complete your sleep, heart rate and, when available, recovery HRV data in Health."
     }
 
     private var syncStatusSystemImage: String {
@@ -162,6 +199,7 @@ struct SyncDashboardView: View {
             return "Syncing…"
         }
         if isAuthenticated {
+            if viewModel.needsInitialSetup { return "Set up sync" }
             return "Sync now"
         }
         switch viewModel.authStatus {
@@ -169,16 +207,18 @@ struct SyncDashboardView: View {
             return "Complete MFA"
         case .reconnectRequired:
             return "Reconnect"
+        case .disconnected where viewModel.setupCompleted:
+            return "Reconnect"
         case .authenticated, .disconnected:
             return "Connect WHOOP"
         }
     }
 
     private var lastRunRow: some View {
-        HStack(spacing: 12) {
+        adaptiveRow {
             Label("Last run", systemImage: "clock.fill")
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
+            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
+            VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 2) {
                 if let date = viewModel.diagnostics.lastRunFinishedAt ?? viewModel.diagnostics.lastRunStartedAt {
                     Text(dateValue(date))
                         .monospacedDigit()
@@ -190,7 +230,7 @@ struct SyncDashboardView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .multilineTextAlignment(.trailing)
+            .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
         }
     }
 
@@ -223,17 +263,26 @@ struct SyncDashboardView: View {
     }
 
     private func syncedDataRow(title: LocalizedStringKey, systemImage: String, value: String) -> some View {
-        HStack(spacing: 12) {
+        adaptiveRow {
             Label {
                 Text(title)
             } icon: {
                 Image(systemName: systemImage)
             }
-            Spacer()
+            if !dynamicTypeSize.isAccessibilitySize { Spacer() }
             Text(value)
-                .multilineTextAlignment(.trailing)
+                .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func adaptiveRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if dynamicTypeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: 8, content: content)
+        } else {
+            HStack(spacing: 12, content: content)
         }
     }
 

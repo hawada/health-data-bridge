@@ -91,7 +91,29 @@ public struct HeartRatePoint: Codable, Equatable, Hashable, Sendable {
     }
 }
 
+public enum SyncDataResult: String, Equatable, Sendable {
+    case notAttempted = "Not checked"
+    case noData = "No data received"
+    case existing = "Data already existed"
+    case updated = "Samples added or updated"
+    case pendingAccess = "Pending access check"
+    case failed = "Could not finish; retry required"
+
+    var priority: Int {
+        switch self {
+        case .notAttempted: return 0
+        case .noData: return 1
+        case .existing: return 2
+        case .updated: return 3
+        case .failed: return 4
+        case .pendingAccess: return 5
+        }
+    }
+}
+
 public struct SyncSummary: Equatable, Sendable {
+    public var sleepResult: SyncDataResult = .notAttempted
+    public var heartRateResult: SyncDataResult = .notAttempted
     public var recovery = RecoverySyncSummary()
     public var sleepsDownloaded: Int = 0
     public var sleepsWritten: Int = 0
@@ -117,6 +139,8 @@ public struct SyncSummary: Equatable, Sendable {
     public init() {}
 
     public mutating func merge(_ other: SyncSummary) {
+        if other.sleepResult.priority > sleepResult.priority { sleepResult = other.sleepResult }
+        if other.heartRateResult.priority > heartRateResult.priority { heartRateResult = other.heartRateResult }
         if other.recovery.status != .disabled { recovery = other.recovery }
         sleepsDownloaded += other.sleepsDownloaded
         sleepsWritten += other.sleepsWritten

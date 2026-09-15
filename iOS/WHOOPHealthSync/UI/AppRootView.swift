@@ -36,10 +36,16 @@ private enum AppTab: Hashable {
     case options
 }
 
+enum SyncSheet: String, Identifiable {
+    case authentication, configuration, history
+    var id: String { rawValue }
+}
+
 struct AppRootView: View {
     @StateObject private var viewModel = SyncViewModel()
     @State private var selectedTab: AppTab = .sync
-    @State private var showsAuthentication = false
+    @State private var presentedSheet: SyncSheet?
+    @State private var configureAfterLogin = false
     @State private var showsDisconnectConfirmation = false
     @AppStorage("appLanguage") private var appLanguage: AppLanguage = .system
 
@@ -48,7 +54,7 @@ struct AppRootView: View {
             NavigationStack {
                 SyncDashboardView(
                     viewModel: viewModel,
-                    showsAuthentication: $showsAuthentication
+                    presentedSheet: $presentedSheet
                 )
                 .toolbar {
                     accountToolbar
@@ -60,7 +66,7 @@ struct AppRootView: View {
             .tag(AppTab.sync)
 
             NavigationStack {
-                OptionsView(viewModel: viewModel, appLanguage: $appLanguage)
+                OptionsView(viewModel: viewModel, appLanguage: $appLanguage, presentedSheet: $presentedSheet)
                     .toolbar {
                         accountToolbar
                     }
@@ -70,8 +76,20 @@ struct AppRootView: View {
             }
             .tag(AppTab.options)
         }
-        .sheet(isPresented: $showsAuthentication) {
-            AuthenticationSheet(viewModel: viewModel)
+        .sheet(item: $presentedSheet, onDismiss: {
+            if configureAfterLogin {
+                configureAfterLogin = false
+                presentedSheet = .configuration
+            }
+        }) { destination in
+            switch destination {
+            case .authentication:
+                AuthenticationSheet(viewModel: viewModel, onConnected: {
+                    configureAfterLogin = viewModel.needsInitialSetup
+                })
+            case .configuration: SyncSetupView(viewModel: viewModel)
+            case .history: HistoryImportView(viewModel: viewModel)
+            }
         }
         .confirmationDialog(
             "Disconnect WHOOP?",
@@ -102,7 +120,7 @@ struct AppRootView: View {
                     .disabled(true)
 
                     Button {
-                        showsAuthentication = true
+                        presentedSheet = .authentication
                     } label: {
                         Label("Reconnect", systemImage: "arrow.clockwise")
                     }
@@ -118,7 +136,7 @@ struct AppRootView: View {
                     .disabled(viewModel.isSyncing || viewModel.isBindingAccount)
                 } else {
                     Button {
-                        showsAuthentication = true
+                        presentedSheet = .authentication
                     } label: {
                         Label(accountActionTitle, systemImage: "person.crop.circle.badge.plus")
                     }

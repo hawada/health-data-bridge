@@ -18,6 +18,8 @@ final class LiveSyncRuntime {
     private let recoveryAdapter: HealthKitRecoveryAdapter
     private let recoveryPipeline: RecoverySyncPipeline
     private let syncEngine: SyncEngine
+    private var operationSummary: SyncSummary?
+    var historyProgressChanged: (() -> Void)?
 
     private init() {
         let tokenStore = KeychainTokenStore()
@@ -37,7 +39,7 @@ final class LiveSyncRuntime {
         let provider = WhoopPrivateRecoveryProvider(currentUserID: { try await api.fetchCurrentUser().id }, fetch: { id, window in
             try await api.fetchRecoveryCycleRecords(userID: id, window: window)
         }, state: { try repository.recoveryState() }, commitState: { try repository.commitRecoveryState($0) })
-        let recoveryPipeline = RecoverySyncPipeline(provider: provider, health: recoveryAdapter, persistence: repository, appBundle: "com.joselourido.WHOOPHealthSync", canContinueHistory: {
+        let recoveryPipeline = RecoverySyncPipeline(provider: provider, health: recoveryAdapter, persistence: repository, appBundle: Bundle.main.bundleIdentifier ?? "com.joselourido.WHOOPHealthSync", canContinueHistory: {
             #if os(iOS)
             return UIApplication.shared.applicationState == .active
             #else
@@ -65,13 +67,65 @@ final class LiveSyncRuntime {
     func authorizeRecovery() async throws -> RecoveryAuthorization {
         guard !syncInProgress else { throw RecoverySyncError.unavailable }
         syncInProgress = true; defer { syncInProgress = false }
-        var saved = try repository.recoveryState()
-        saved.enabled = false; saved.userConfirmedFullReadAccess = false
-        try repository.commitRecoveryState(saved)
         try await recoveryAdapter.requestAuthorization()
-        let access = try await recoveryAdapter.readAccess()
-        let sources = (try? await recoveryAdapter.observedWhoopSources()) ?? []
-        return RecoveryAuthorization(sources: sources, access: access)
+        return try await inspectRecoveryAuthorization()
+    }
+
+    // Inspect with a fresh confirmation. Opening/cancelling setup must not alter saved HRV state.
+    private func inspectRecoveryAuthorization() async throws -> RecoveryAuthorization {
+        let writeAuthorized = (try? recoveryAdapter.validateWriteAuthorization()) != nil
+        let inspection = HealthKitRecoveryAdapter(officialBundle: { try? self.repository.recoveryState().officialWhoopBundle })
+        let access = try await inspection.readAccess()
+        let sources = try await inspection.observedWhoopSources()
+        return RecoveryAuthorization(sources: sources, access: access, writeAuthorized: writeAuthorized)
+    }
+
+    func authorizeSyncData(includeRecovery: Bool) async throws -> RecoveryAuthorization? {
+        try await authorizeSelectedData(includeRecovery: includeRecovery).recovery
+    }
+
+    func authorizeSelectedData(includeRecovery: Bool) async throws -> SyncDataAuthorization {
+        guard !syncInProgress else { throw RecoverySyncError.unavailable }
+        syncInProgress = true; defer { syncInProgress = false }
+        try repository.ensureUsable()
+        var result = try await healthKitService.requestSelectedAuthorization(includeRecovery: includeRecovery && recoveryAvailable)
+        result.recovery = includeRecovery && recoveryAvailable ? try await inspectRecoveryAuthorization() : nil
+        return result
+    }
+
+    func saveSyncSetup(includeRecovery: Bool, fullReadConfirmed: Bool, whoopBundle: String?, now: Date) async throws {
+        guard !syncInProgress else { throw RecoverySyncError.unavailable }
+        syncInProgress = true; defer { syncInProgress = false }
+        try repository.ensureUsable()
+        guard !repository.requiresManualAccountBinding else { throw SyncRepositoryError.accountBindingRequired }
+        guard case let .authenticated(email) = authService.currentStatus() else { throw AutomatedSyncError.whoopNotConnected }
+        let key = WhoopRecovery.pseudonymousAccountKey(userID: try await api.fetchCurrentUser().id)
+        try healthKitService.validateExistingAuthorization()
+        var state = try repository.recoveryState()
+        if includeRecovery {
+            guard HKRecoverySetup.validBundle(whoopBundle) else { throw RecoverySyncError.invalidRecord }
+            let adapter = HealthKitRecoveryAdapter(manualConfirmation: { fullReadConfirmed }, officialBundle: { whoopBundle })
+            let sources = try await adapter.observedWhoopSources()
+            if let whoopBundle {
+                guard sources.contains(where: { $0.bundle == whoopBundle }) else { throw RecoverySyncError.readUnverified }
+            }
+            try adapter.validateWriteAuthorization()
+            let access = try await adapter.readAccess()
+            guard access != .unknown else { throw RecoverySyncError.readUnverified }
+            state.accountKey = key
+            if state.historyStartDate == nil { state.historyScopeLimited = true }
+            state.historyStartDate = state.historyStartDate ?? now.addingTimeInterval(-7 * 86400)
+            state.userConfirmedFullReadAccess = fullReadConfirmed
+            state.officialWhoopBundle = whoopBundle
+            state.enabled = true; state.configured = true
+            state.pausedForNativeExport = false
+            if case let .nativeExporter(bundle) = access {
+                state.officialWhoopBundle = bundle; state.pausedForNativeExport = true
+            }
+        } else { state.enabled = false }
+        try Task.checkCancellation()
+        guard case let .authenticated(current) = authService.currentStatus(), current == email else { throw RecoverySyncError.accountMismatch }
+        try repository.saveSyncSetup(recovery: state, accountKey: key)
     }
     func configureRecovery(start: Date, fullReadConfirmed: Bool, whoopBundle: String?) async throws {
         guard !syncInProgress else { throw RecoverySyncError.unavailable }
@@ -83,6 +137,7 @@ final class LiveSyncRuntime {
         guard case let .authenticated(current) = authService.currentStatus(), current == email else { throw RecoverySyncError.accountMismatch }
         guard start < Date(), HKRecoverySetup.validBundle(whoopBundle) else { throw RecoverySyncError.invalidRecord }
         let setupAdapter = HealthKitRecoveryAdapter(manualConfirmation: { fullReadConfirmed }, officialBundle: { whoopBundle })
+        try setupAdapter.validateWriteAuthorization()
         let access = try await setupAdapter.readAccess()
         guard access != .unknown else { throw RecoverySyncError.readUnverified }
         guard case let .authenticated(afterAuthorization) = authService.currentStatus(), afterAuthorization == email else { throw RecoverySyncError.accountMismatch }
@@ -109,7 +164,67 @@ final class LiveSyncRuntime {
     func synchronize() async throws -> SyncSummary {
         guard !syncInProgress else { throw RecoverySyncError.unavailable }
         syncInProgress = true; defer { syncInProgress = false }
-        return try await syncEngine.synchronize()
+        operationSummary = nil
+        try repository.ensureUsable()
+        guard repository.hasCompletedSyncSetup else { throw AutomatedSyncError.initialManualSyncRequired }
+        try healthKitService.validateExistingAuthorization()
+        do {
+            // Keep legacy manual access-pending reconciliation. Explicit history has separate cursors.
+            let summary = try await syncEngine.synchronize(recoveryMode: .recent, resumeDeferred: true)
+            operationSummary = summary; return summary
+        } catch { operationSummary = syncEngine.lastSummary; throw error }
+    }
+
+    var latestOperationSummary: SyncSummary? { operationSummary }
+
+    func importHistory(start: Date?) async throws -> SyncSummary {
+        guard !syncInProgress else { throw RecoverySyncError.unavailable }
+        syncInProgress = true; defer { syncInProgress = false }
+        operationSummary = nil
+        try repository.ensureUsable()
+        guard case let .authenticated(email) = authService.currentStatus() else { throw AutomatedSyncError.whoopNotConnected }
+        let user = try await api.fetchCurrentUser()
+        guard case let .authenticated(current) = authService.currentStatus(), current == email else { throw RecoverySyncError.accountMismatch }
+        let key = WhoopRecovery.pseudonymousAccountKey(userID: user.id)
+        try repository.validateAccount(key)
+        try await healthKitService.requestAuthorization()
+        let importer = HistoryImporter(repository: repository, syncWindow: { window in
+            try await self.syncEngine.synchronize(recoveryMode: .recent, resumeDeferred: false, historyWindow: window)
+        }, syncRecovery: {
+            let cutoff = self.repository.historyCutoff ?? Date()
+            var history = try await self.recoveryPipeline.run(accountKey: key, mode: .history, now: cutoff, maxPages: Int.max)
+            // Wider history already imported is retained; still discover data since its last live checkpoint.
+            let recent = try await self.recoveryPipeline.run(accountKey: key, mode: .recent, now: cutoff)
+            history.downloaded += recent.downloaded; history.written += recent.written
+            history.revised += recent.revised; history.unchanged += recent.unchanged
+            history.skippedExternal += recent.skippedExternal; history.unscorable += recent.unscorable
+            history.invalid += recent.invalid; history.deferredAccess += recent.deferredAccess
+            history.pending = recent.pending; history.recentCompleted = recent.recentCompleted
+            if ![.completed, .historyLimited, .disabled].contains(recent.status) { history.status = recent.status }
+            return history
+        }, canContinue: {
+            #if os(iOS)
+            return UIApplication.shared.applicationState == .active
+            #else
+            return true
+            #endif
+        })
+        importer.progressChanged = { [weak self] in self?.historyProgressChanged?() }
+        do {
+            let summary = try await importer.run(start: start)
+            operationSummary = summary
+            let run = try repository.createRejectedRun(startedAt: Date())
+            try repository.finishRun(run, summary: summary, status: summary.errors.isEmpty ? "success" : "partial")
+            return summary
+        } catch {
+            var summary = importer.lastSummary
+            summary.errors = [SensitiveTextSanitizer.redact(error.localizedDescription)]
+            operationSummary = summary
+            if let run = try? repository.createRejectedRun(startedAt: Date()) {
+                try? repository.finishRun(run, summary: summary, status: error is CancellationError ? "cancelled" : "failed")
+            }
+            throw error
+        }
     }
 
     func probeExistingCyclesSchema() async throws -> String {
@@ -158,14 +273,20 @@ final class LiveSyncRuntime {
             throw AutomatedSyncError.whoopNotConnected
         }
 
+        try Self.validateAutomatedSetup(repository: repository)
+
+        try healthKitService.validateExistingAuthorization()
+        return try await syncEngine.synchronize(recoveryMode: .recent, resumeDeferred: false)
+    }
+
+    static func validateAutomatedSetup(repository: SyncRepository) throws {
+        try repository.ensureUsable()
         guard !repository.requiresManualAccountBinding else { throw SyncRepositoryError.accountBindingRequired }
+        guard repository.hasCompletedSyncSetup else { throw AutomatedSyncError.initialManualSyncRequired }
         let checkpoints = try repository.checkpoints()
         guard checkpoints.lastSleepQueryEnd != nil, checkpoints.lastHeartRateEnd != nil else {
             throw AutomatedSyncError.initialManualSyncRequired
         }
-
-        try healthKitService.validateExistingAuthorization()
-        return try await syncEngine.synchronize(recoveryMode: .recent, resumeDeferred: false)
     }
 }
 
@@ -178,7 +299,7 @@ enum AutomatedSyncError: Error, LocalizedError {
         case .whoopNotConnected:
             return "Abre HealthDataBridge y conecta tu cuenta antes de ejecutar la automatización."
         case .initialManualSyncRequired:
-            return "Completa una primera sincronización manual en HealthDataBridge antes de activar la automatización."
+            return String(localized: "Complete sync setup and a first manual sync in HealthDataBridge before running the automation.")
         }
     }
 }

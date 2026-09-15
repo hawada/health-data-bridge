@@ -45,6 +45,35 @@ Service/capability checks also passed. Skips reflect RMSSD/runtime availability,
 
 The maintainer reported a successful basic real-account test on a personal iPhone. Build 0.2.0 (6) was subsequently installed as an update and the three persisted synchronization files were verified byte-for-byte unchanged. This is basic personal acceptance, not exhaustive public-device certification. Private logs, raw observations and device identifiers are intentionally not published.
 
+## Earlier local unified-design verification (before the 0.3 specification review)
+
+The following results belong to the earlier local iteration, not acceptance of the
+subsequent 0.3.0 (7) specification implementation. Current results and omissions are
+recorded separately in [the P01–P24 report](VALIDATION_0.3.md):
+
+- Core XCTest: 81 passed, zero failures.
+- verify_local.sh: all authentication, API, repository, HealthKit factory, App Intent
+  and capability checks passed, including 22 engine scenarios and 10 ViewModel scenarios.
+- iOS 27 isolated UI: 9 passed, zero failures/skips. Includes fresh mocked login →
+  combined setup, explicit HRV checks, HRV opt-out and persisted setup decisions,
+  existing-installation daily sync/relaunch and cancelling unchanged settings.
+- iOS 26.4 isolated UI: 5 passed, zero failures, 4 skipped because those fixtures
+  specifically require iOS 27. The ordinary dashboard/sign-in/accessibility checks passed.
+- iOS 27 native HealthKit/persistence suite: 9 passed, zero failures, 1 skipped
+  (physical-device file protection is not established by this simulator).
+- Unsigned generic simulator and generic iPhone builds passed. Signing identity,
+  bundle identifier, Keychain strings, metadata namespaces and App Intent implementation
+  were not changed.
+
+An initial UI pass failed because the result summary was below the visible lazy-list
+content (and the Spanish summary key needed localization). The summary was moved next
+to the main action, localization corrected and the final full UI suite passed.
+
+Screenshots were inspected for the unified setup, existing-installation result,
+historical-period sheet and prior large-type/language states. Tests use synthetic
+fixtures; no real-account request or installation/update on the personal iPhone was
+performed in this verification. Existing physical acceptance limits still apply.
+
 ## Physical cases still requiring broader acceptance
 
 Real permission revocation, exporter coexistence, large real histories, interruptions/restarts, rate limits across actual sessions, file protection while locked and updates across other users' accounts need explicit physical testing. Simulator mocks do not establish these outcomes. The declared history period is not a provider-certified absolute-history endpoint.

@@ -28,11 +28,15 @@ final class RecoveryUITests: XCTestCase {
     }
     func testT27LargeTypeHasAccessibleStateAndActions() {
         let app = app(language: "spanish", largeType: true)
-        for _ in 0..<4 {
-            if app.staticTexts["recovery.dashboard.status"].exists { break }
+        let status = app.staticTexts["recovery.dashboard.status"]
+        // Saved progress/reconnection copy can add several screens at accessibility XXXL.
+        // Verify actual reachability instead of assuming a fixed four-swipe layout.
+        for _ in 0..<10 {
+            if status.exists && status.isHittable { break }
             app.swipeUp()
         }
-        XCTAssertTrue(app.staticTexts["recovery.dashboard.status"].waitForExistence(timeout: 10))
+        attach("XXXL scrolled recovery status", app)
+        XCTAssertTrue(status.waitForExistence(timeout: 10)); XCTAssertTrue(status.isHittable)
         app.tabBars.buttons["Opciones"].tap()
         XCTAssertTrue(app.staticTexts["recovery.status"].waitForExistence(timeout: 5))
         attach("Large type", app)
@@ -63,14 +67,14 @@ final class RecoveryUITests: XCTestCase {
         attach("Read-only recovery comparison", app)
     }
 
-    func testRecoverySetupRequiresExplicitChecksAndEnablesDedicatedImport() throws {
+    func testRecoverySetupRequiresExplicitChecksAndRunsUnifiedSync() throws {
         guard #available(iOS 27, *) else { throw XCTSkip("Recovery setup requires iOS 27") }
         guard ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"]?.contains("WHOOP 0.2 QA") == true else { throw XCTSkip("Requires isolated recovery QA simulator") }
-        let app = XCUIApplication(); app.launchArguments = ["-appLanguage", "spanish", "-whoopRecoveryUITest"]
+        let app = XCUIApplication(); app.launchArguments = ["-appLanguage", "spanish", "-whoopRecoveryUITest", "-whoopFixtureID", UUID().uuidString]
         app.launch()
-        app.tabBars.buttons["Opciones"].tap()
-        let configure = app.buttons["recovery.configure"]
+        let configure = app.buttons["sync.primary"]
         XCTAssertTrue(configure.waitForExistence(timeout: 10)); XCTAssertTrue(configure.isEnabled); configure.tap()
+        XCTAssertEqual(app.datePickers.count, 0, "Initial setup must not ask for a historical start")
         let enable = app.buttons["recovery.enable"]
         XCTAssertFalse(enable.exists && enable.isEnabled)
         let authorize = app.buttons["recovery.authorize"]
@@ -89,15 +93,128 @@ final class RecoveryUITests: XCTestCase {
         attach("Recovery setup before enabling", app)
         XCTAssertTrue(enable.isEnabled)
         attach("Recovery authorization confirmations", app); enable.tap()
+        XCTAssertTrue(app.staticTexts["Resumen"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["HRV de recuperación escrita"].exists)
+        app.tabBars.buttons["Opciones"].tap()
         let importButton = app.buttons["recovery.importHistory"]
         XCTAssertTrue(importButton.waitForExistence(timeout: 5)); XCTAssertTrue(importButton.isEnabled); importButton.tap()
-        XCTAssertTrue(app.staticTexts["Histórico indicado importado"].waitForExistence(timeout: 5))
-        attach("Declared history imported", app)
+        XCTAssertTrue(app.datePickers.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["history.start"].isEnabled)
+        attach("Common historical period", app)
+        app.buttons["Cancelar"].tap()
         app.terminate()
+    }
+
+    func testExistingInstallationKeepsDailyFlowAcrossRelaunch() throws {
+        guard #available(iOS 27, *) else { throw XCTSkip("Requires isolated iOS 27 fixture") }
+        guard ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"]?.contains("WHOOP 0.2 QA") == true else { throw XCTSkip("Requires isolated QA simulator") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-appLanguage", "english", "-whoopExistingUITest", "-whoopFixtureID", UUID().uuidString]
+        app.launch()
+        let sync = app.buttons["sync.primary"]
+        XCTAssertTrue(sync.waitForExistence(timeout: 10)); XCTAssertEqual(sync.label, "Sync now")
+        XCTAssertFalse(app.buttons["recovery.authorize"].exists)
+        sync.tap()
+        XCTAssertTrue(app.staticTexts["Summary"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Recovery HRV written"].exists)
+        attach("Existing installation unified daily sync", app)
+        app.terminate(); app.launch()
+        XCTAssertTrue(sync.waitForExistence(timeout: 10)); XCTAssertEqual(sync.label, "Sync now")
+        XCTAssertFalse(app.buttons["recovery.authorize"].exists)
+        app.tabBars.buttons["Options"].tap()
+        app.buttons["recovery.configure"].tap()
+        XCTAssertTrue(app.buttons["recovery.authorize"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.switches["sync.includeHRV"].value as? String, "1")
+        app.buttons["Cancel"].tap()
+        app.tabBars.buttons["Sync"].tap()
+        XCTAssertEqual(sync.label, "Sync now")
+        attach("Existing configuration cancelled without onboarding", app)
+    }
+
+    func testFreshSetupCanContinueWithoutHRVAndDoesNotRepeat() throws {
+        guard #available(iOS 27, *) else { throw XCTSkip("Requires isolated iOS 27 fixture") }
+        guard ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"]?.contains("WHOOP 0.2 QA") == true else { throw XCTSkip("Requires isolated QA simulator") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-appLanguage", "english", "-whoopRecoveryUITest", "-whoopFixtureID", UUID().uuidString]
+        app.launch(); app.buttons["sync.primary"].tap()
+        let toggle = app.switches["sync.includeHRV"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        app.buttons["recovery.authorize"].tap()
+        let save = app.buttons["recovery.enable"]
+        for _ in 0..<4 { if save.exists && save.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(save.isEnabled); save.tap()
+        XCTAssertTrue(app.staticTexts["Summary"].waitForExistence(timeout: 10))
+        app.terminate(); app.launch()
+        XCTAssertEqual(app.buttons["sync.primary"].label, "Sync now")
+        XCTAssertFalse(app.buttons["recovery.authorize"].exists)
+        app.tabBars.buttons["Options"].tap(); app.buttons["recovery.configure"].tap()
+        XCTAssertTrue(app.switches["sync.includeHRV"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.switches["sync.includeHRV"].value as? String, "0", "A saved opt-out must not be replaced by the new-user default")
+        app.buttons["Cancel"].tap()
+        attach("Fresh setup without HRV persisted", app)
     }
 
     private func attach(_ name: String, _ app: XCUIApplication) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
+    func testFreshLoginOpensCombinedSetupAutomaticallyAndCanBeCancelled() throws {
+        guard #available(iOS 27, *) else { throw XCTSkip("Requires isolated iOS 27 fixture") }
+        guard ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"]?.contains("WHOOP 0.2 QA") == true else { throw XCTSkip("Requires isolated QA simulator") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-appLanguage", "english", "-whoopLoginUITest", "-whoopFixtureID", UUID().uuidString]
+        app.launch(); app.buttons["sync.primary"].tap()
+        let email = app.textFields["Email"]
+        XCTAssertTrue(email.waitForExistence(timeout: 5)); email.tap(); email.typeText("new@example.invalid")
+        let password = app.secureTextFields["Password"]
+        password.tap(); password.typeText("fixture-only")
+        app.navigationBars.buttons["Connect"].tap()
+        XCTAssertTrue(app.buttons["recovery.authorize"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.switches["sync.includeHRV"].exists)
+        XCTAssertEqual(app.datePickers.count, 0)
+        attach("Fresh login routes to combined setup", app)
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["sync.primary"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["sync.primary"].label, "Set up sync")
+        XCTAssertFalse(app.buttons["recovery.authorize"].exists, "Cancelling does not trap the user in repeated onboarding")
+    }
+
+    func testDeniedHRVCanContinueWithBaseWithoutAnotherAuthorization() throws {
+        guard #available(iOS 27, *) else { throw XCTSkip("Requires iOS 27 HRV fixture") }
+        guard ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"]?.contains("WHOOP 0.2 QA") == true else { throw XCTSkip("Requires isolated QA simulator") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-appLanguage", "spanish", "-whoopRecoveryUITest", "-whoopHRVDeniedUITest", "-whoopFixtureID", UUID().uuidString]
+        app.launch(); app.buttons["sync.primary"].tap()
+        let authorize = app.buttons["recovery.authorize"]
+        for _ in 0..<6 { if authorize.isHittable { break }; app.swipeUp() }
+        authorize.tap()
+        let continueBase = app.buttons["sync.continueWithoutHRV"]
+        for _ in 0..<8 { if continueBase.exists && continueBase.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(continueBase.isHittable); continueBase.tap()
+        let save = app.buttons["recovery.enable"]
+        for _ in 0..<6 { if save.exists && save.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(save.isEnabled, "Base authorization remains valid after dropping denied HRV")
+        save.tap(); XCTAssertTrue(app.staticTexts["Resumen"].waitForExistence(timeout: 10))
+        attach("HRV denied; base setup retained", app)
+    }
+
+    func testEarlierIOSCanConfigureBaseAndExplainsUnavailableRMSSD() throws {
+        if #available(iOS 27, *) { throw XCTSkip("Requires earlier runtime") }
+        guard ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"]?.contains("WHOOP 0.2 QA") == true else { throw XCTSkip("Requires isolated QA simulator") }
+        let app = XCUIApplication()
+        app.launchArguments = ["-appLanguage", "english", "-whoopRecoveryUITest", "-whoopFixtureID", UUID().uuidString]
+        app.launch(); app.buttons["sync.primary"].tap()
+        XCTAssertFalse(app.switches["sync.includeHRV"].isEnabled)
+        XCTAssertTrue(app.staticTexts["Requires iOS 27 and support for RMSSD HRV"].exists)
+        let authorize = app.buttons["recovery.authorize"]
+        for _ in 0..<6 { if authorize.isHittable { break }; app.swipeUp() }
+        authorize.tap()
+        let save = app.buttons["recovery.enable"]
+        for _ in 0..<6 { if save.exists && save.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(save.isEnabled); save.tap()
+        XCTAssertTrue(app.staticTexts["Summary"].waitForExistence(timeout: 10))
+        attach("Earlier iOS base configuration", app)
     }
 }

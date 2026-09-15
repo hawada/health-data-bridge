@@ -184,6 +184,20 @@ private enum TestFailure: Error { case disk, network, save }
     }
 }
 final class RecoveryPipelineTests: XCTestCase {
+    @MainActor func testFixedCutoffSkipsFuturePendingAndDoesNotRewindRecentCheckpoint() async throws {
+        let (s,p,h,e) = system()
+        let future = recovery("future", daysAgo: -1)
+        s.state.lastDiscoveryEnd = now.addingTimeInterval(3 * 86400)
+        s.state.pendingItems[future.cycleID] = RecoveryPendingItem(cycleID: future.cycleID,
+            firstDetectedAt: now, reason: "pending_score", range: future.sleepRange)
+        p.individual[future.cycleID] = future; p.recent = [future]
+        _ = try await e.run(accountKey: "account", mode: .recent, now: now)
+        XCTAssertEqual(h.saves, 0)
+        XCTAssertNotNil(s.state.pendingItems[future.cycleID])
+        XCTAssertEqual(s.state.lastDiscoveryEnd, now.addingTimeInterval(3 * 86400))
+        XCTAssertEqual(p.recentWindow?.end, now)
+    }
+
     @MainActor private func system() -> (MemoryState, Provider, Health, RecoverySyncPipeline) {
         let state = MemoryState(), provider = Provider(), health = Health()
         return (state, provider, health, RecoverySyncPipeline(provider: provider, health: health, persistence: state, appBundle: app))

@@ -12,13 +12,13 @@ A free, open-source iOS app that fills gaps in Apple Health using data from your
 - Resumes from confirmed checkpoints and reconciles recent source revisions.
 - Offers manual synchronization and an App Shortcut (`Sincronizar WHOOP` / `Sync WHOOP`) for personal automations.
 - Optionally imports recovery **HRV in milliseconds (RMSSD)** on supporting iOS 27 devices. This is not WHOOP's recovery percentage and is not SDNN.
-- Provides an explicit HRV setup flow, a user-selected history start date, progress, pending items and cancellation.
+- Configures compatible data together, starts new users with seven days and offers one optional historical-period import with durable resume and cancellation.
 - Preserves other sources' samples; cleanup is restricted to records identified as belonging to this app.
 - Includes English and Spanish interfaces, local diagnostics and tests.
 
 ## Status and important limitations
 
-Current development version: **0.2.0 (6)**. The maintainer has used the app on a personal iPhone; automated results are summarized in [Testing](docs/TESTING.md). This is not a claim of compatibility with every account or permission configuration.
+Published baseline: **0.2.0 (6)**. The source candidate is **0.3.0 (7)** with unified setup and synchronization. See its [P01–P24 validation report](docs/VALIDATION_0.3.md) for executed checks and outstanding physical acceptance. No new personal-iPhone installation is claimed. Previous results are summarized in [Testing](docs/TESTING.md).
 
 The app currently uses **private, undocumented WHOOP endpoints**, including its authentication flow. They can change or become unavailable. Publishing the source does not establish permission to use these endpoints: review [WHOOP's API terms](https://developer.whoop.com/api-terms-of-use/) and applicable service terms. No claim of WHOOP authorization is made. This license covers this project's code, not WHOOP services, data or trademarks.
 
@@ -48,7 +48,7 @@ Select the `WHOOPHealthSync` scheme. Under **Signing & Capabilities**, select yo
 
 Existing maintainer installations keep their original bundle identifier and storage identifiers. The internal Xcode target and Swift modules retain their legacy names for continuity; the visible app is **HealthDataBridge**. An update with the same bundle ID and signing identity preserves the existing app container.
 
-For recovery HRV, open **Options → Configure recovery HRV**, choose the start of your actual WHOOP usage, request HRV authorization, confirm the applicable source/read-access checks and enable the feature. See [Usage](docs/USAGE.md).
+New users configure sleep, heart rate and compatible recovery HRV together after connecting WHOOP. Authorize the selected data, confirm applicable HRV source/read checks and choose **Save and sync**. Existing installations keep their usual button, session, historical scope and progress without repeating setup. **Options → Configure sync** changes selected data; **Import an earlier period** is the separate common historical action. See [Usage](docs/USAGE.md) and [continuity design](docs/UNIFIED_SYNC_DESIGN.md).
 
 ## Tests
 

@@ -20,6 +20,31 @@ extension LiveSyncRuntime: AccountBindingProviding {}
 }
 extension LiveSyncRuntime: RecoveryConfiguring {}
 
+@MainActor protocol SyncDataConfiguring {
+    func authorizeSyncData(includeRecovery: Bool) async throws -> RecoveryAuthorization?
+}
+extension LiveSyncRuntime: SyncDataConfiguring {}
+
+@MainActor protocol SelectedDataAuthorizing {
+    func authorizeSelectedData(includeRecovery: Bool) async throws -> SyncDataAuthorization
+}
+extension LiveSyncRuntime: SelectedDataAuthorizing {}
+
+@MainActor protocol SyncSetupSaving {
+    func saveSyncSetup(includeRecovery: Bool, fullReadConfirmed: Bool, whoopBundle: String?, now: Date) async throws
+}
+extension LiveSyncRuntime: SyncSetupSaving {}
+
+@MainActor protocol OperationSummaryProviding {
+    var latestOperationSummary: SyncSummary? { get }
+}
+extension LiveSyncRuntime: OperationSummaryProviding {}
+
+@MainActor protocol HistoryRunning {
+    func importHistory(start: Date?) async throws -> SyncSummary
+}
+extension LiveSyncRuntime: HistoryRunning {}
+
 protocol SyncRunning {
     func synchronize() async throws -> SyncSummary
 }
@@ -55,6 +80,28 @@ final class SyncViewModel: ObservableObject {
     @Published var isBindingAccount = false
     @Published var errors: [String] = []
     @Published var events: [String] = []
+    @Published private(set) var setupCompleted = false
+    @Published private(set) var dataAuthorizationCompleted = false
+    @Published private(set) var selectedDataAuthorization: SyncDataAuthorization?
+    @Published private(set) var repositoryAvailable = false
+    private var authorizedRecoverySelection: Bool?
+    private var isSavingSetup = false
+    @Published private(set) var pendingHistoryWindow: TimeRange?
+    @Published private(set) var hasPendingHistoryImport = false
+    @Published private(set) var historyCutoff: Date?
+    @Published private(set) var historyPhase = ""
+
+    var needsInitialSetup: Bool {
+        if case .authenticated = authStatus { return repositoryAvailable && !setupCompleted }
+        return false
+    }
+    var canImportHistory: Bool {
+        if case .authenticated = authStatus {
+            return syncEngine is any HistoryRunning && setupCompleted && !requiresAccountBinding &&
+                !isSyncing && !isAuthenticating && !isConfiguringRecovery && !isBindingAccount && !isProbingRecovery
+        }
+        return false
+    }
 
     private var authService: WhoopAuthService?
     private var healthKitService: (any HealthKitAuthorizing)?
@@ -93,15 +140,40 @@ final class SyncViewModel: ObservableObject {
             return
         }
         #if targetEnvironment(simulator) && WHOOP_VALIDATION_BUILD && WHOOP_IOS27_SDK
-        if #available(iOS 27, *), ProcessInfo.processInfo.arguments.contains("-whoopRecoveryUITest"),
+        if (ProcessInfo.processInfo.arguments.contains("-whoopRecoveryUITest") || ProcessInfo.processInfo.arguments.contains("-whoopExistingUITest") || ProcessInfo.processInfo.arguments.contains("-whoopLoginUITest")),
            ProcessInfo.processInfo.environment["SIMULATOR_DEVICE_NAME"]?.contains("WHOOP 0.2 QA") == true {
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("recovery-ui-fixture")
-            try? FileManager.default.removeItem(at: directory)
+            let arguments = ProcessInfo.processInfo.arguments
+            let index = arguments.firstIndex(of: "-whoopFixtureID")
+            let fixtureID = index.flatMap { $0 + 1 < arguments.count ? UUID(uuidString: arguments[$0 + 1]) : nil } ?? UUID()
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sync-ui-fixture-\(fixtureID.uuidString)")
             let repository = SyncRepository(fileURL: directory.appendingPathComponent("sync-store.json"))
             try? repository.bindAccountManually("isolated-ui-account")
             self.repository = repository
-            self.recoveryConfigurator = IsolatedRecoveryUIFixture(repository: repository)
+            let fixture = IsolatedRecoveryUIFixture(repository: repository)
+            if arguments.contains("-whoopExistingUITest"), (try? repository.checkpoints().lastSleepQueryEnd) == nil {
+                let now = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+                try? repository.setSleepCheckpoint(now)
+                try? repository.setHeartRateCheckpoint(now, resolution: 6)
+                var state = RecoverySyncState()
+                state.accountKey = "isolated-ui-account"; state.enabled = true; state.configured = true
+                state.historyStartDate = now.addingTimeInterval(-200 * 86400)
+                state.initialImportCutoff = now; state.initialEnumerationComplete = true
+                state.lastDiscoveryEnd = now; state.historicalPagesConfirmed = 30
+                state.userConfirmedFullReadAccess = true; state.historyScopeLimited = true
+                try? repository.commitRecoveryState(state)
+            }
+            self.recoveryConfigurator = fixture
+            self.syncEngine = fixture
+            self.healthKitService = fixture
             self.authStatus = .authenticated(email: "simulator@example.invalid")
+            if arguments.contains("-whoopLoginUITest") {
+                let sessionConfiguration = URLSessionConfiguration.ephemeral
+                sessionConfiguration.protocolClasses = [IsolatedLoginURLProtocol.self]
+                self.authService = WhoopAuthService(tokenStore: IsolatedLoginTokenStore(),
+                    session: URLSession(configuration: sessionConfiguration),
+                    configuration: WhoopAuthConfiguration(cognitoURL: URL(string: "https://auth.example.invalid/")!))
+                self.authStatus = .disconnected
+            }
             self.isConfigured = true; refreshDiagnostics(); return
         }
         #endif
@@ -111,6 +183,7 @@ final class SyncViewModel: ObservableObject {
         runtime.recoveryProgressChanged = { [weak self] state, summary in
             self?.recoveryState = state; self?.recoveryProgress = summary
         }
+        runtime.historyProgressChanged = { [weak self] in self?.refreshDiagnostics() }
         self.accountBinder = runtime
         self.authService = runtime.authService
         self.healthKitService = runtime
@@ -201,7 +274,8 @@ final class SyncViewModel: ObservableObject {
 
         do {
             let task = Task { @MainActor in
-                try await healthKitService.requestAuthorization()
+                // The live runtime validates existing permissions without reopening authorization.
+                if !(syncEngine is LiveSyncRuntime) { try await healthKitService.requestAuthorization() }
                 try Task.checkCancellation()
                 return try await syncEngine.synchronize()
             }
@@ -212,12 +286,103 @@ final class SyncViewModel: ObservableObject {
             errors = summary.errors.map(SensitiveTextSanitizer.redact)
             appendEvent("Sincronizacion terminada en \(String(format: "%.1f", summary.elapsedSeconds)) s.")
         } catch {
+            lastSummary = (syncEngine as? any OperationSummaryProviding)?.latestOperationSummary
             let message = Self.message(error)
             if Self.requiresReconnect(error) {
                 authStatus = .reconnectRequired(reason: message)
             }
             errors.append(message)
             appendEvent("Sincronizacion fallida: \(message)")
+        }
+    }
+
+    func resetSetupAuthorization() {
+        dataAuthorizationCompleted = false
+        recoveryAuthorization = nil
+        selectedDataAuthorization = nil
+        authorizedRecoverySelection = nil
+    }
+
+    func continueSetupWithoutRecovery() {
+        // The already-requested base types have not changed. Only discard the HRV draft.
+        recoveryAuthorization = nil
+        authorizedRecoverySelection = false
+    }
+
+    func authorizeSyncData(includeRecovery: Bool) async {
+        guard !isSyncing, !isAuthenticating, !isConfiguringRecovery, !isBindingAccount else { return }
+        isConfiguringRecovery = true
+        errors.removeAll(); resetSetupAuthorization()
+        defer { isConfiguringRecovery = false; refreshDiagnostics() }
+        do {
+            try repository?.ensureUsable()
+            if let configurator = syncEngine as? any SelectedDataAuthorizing {
+                let result = try await configurator.authorizeSelectedData(includeRecovery: includeRecovery)
+                selectedDataAuthorization = result
+                recoveryAuthorization = result.recovery
+                if !result.baseWriteAuthorized {
+                    var denied: [String] = []
+                    if !result.sleepWriteAuthorized { denied.append(String(localized: "Sleep")) }
+                    if !result.heartRateWriteAuthorized { denied.append(String(localized: "Heart rate")) }
+                    errors.append(Self.message(HealthKitSyncError.writeAuthorizationDenied(denied)))
+                    return
+                }
+            } else if let configurator = syncEngine as? any SyncDataConfiguring {
+                recoveryAuthorization = try await configurator.authorizeSyncData(includeRecovery: includeRecovery)
+            } else {
+                guard let healthKitService else { throw HealthKitSyncError.healthDataUnavailable }
+                try await healthKitService.requestAuthorization()
+                if includeRecovery { recoveryAuthorization = try await recoveryConfigurator?.authorizeRecovery() }
+            }
+            dataAuthorizationCompleted = true
+            authorizedRecoverySelection = includeRecovery
+        } catch { errors.append(Self.message(error)) }
+    }
+
+    func completeSyncSetup(includeRecovery: Bool, fullReadConfirmed: Bool, whoopBundle: String?,
+                           now: Date = Date()) async -> Bool {
+        guard dataAuthorizationCompleted, (!includeRecovery || authorizedRecoverySelection == true),
+              !isSavingSetup, !requiresAccountBinding, !isSyncing, !isAuthenticating,
+              !isConfiguringRecovery, let repository else { return false }
+        guard case .authenticated = authStatus else { return false }
+        if includeRecovery {
+            guard supportsRecovery, let authorization = recoveryAuthorization, authorization.writeAuthorized,
+                  authorization.access != .unknown || fullReadConfirmed else { return false }
+            if let whoopBundle, !authorization.sources.contains(where: { $0.bundle == whoopBundle }) { return false }
+        }
+        isSavingSetup = true; isConfiguringRecovery = true
+        defer { isSavingSetup = false; isConfiguringRecovery = false; refreshDiagnostics() }
+        do {
+            try repository.ensureUsable()
+            if let saver = (syncEngine as? any SyncSetupSaving) ?? (recoveryConfigurator as? any SyncSetupSaving) {
+                try await saver.saveSyncSetup(includeRecovery: includeRecovery, fullReadConfirmed: fullReadConfirmed,
+                    whoopBundle: whoopBundle, now: now)
+            } else if !includeRecovery {
+                var state = try repository.recoveryState()
+                state.enabled = false
+                try repository.saveSyncSetup(recovery: state)
+            } else { throw RecoverySyncError.unavailable }
+            refreshDiagnostics()
+            return true
+        } catch {
+            if Self.requiresReconnect(error) { authStatus = .reconnectRequired(reason: Self.message(error)) }
+            errors.append(Self.message(error)); return false
+        }
+    }
+
+    func importHistory(start: Date?) async {
+        guard canImportHistory, let importer = syncEngine as? any HistoryRunning else { return }
+        isSyncing = true; errors.removeAll(); lastSummary = nil; recoveryProgress = RecoverySyncSummary()
+        defer { isSyncing = false; activeSyncTask = nil; refreshDiagnostics() }
+        let task = Task { @MainActor in try await importer.importHistory(start: start) }
+        activeSyncTask = task
+        do {
+            let summary = try await task.value
+            lastSummary = summary; errors = summary.errors.map(SensitiveTextSanitizer.redact)
+        } catch {
+            lastSummary = (syncEngine as? any OperationSummaryProviding)?.latestOperationSummary
+            if Self.requiresReconnect(error) { authStatus = .reconnectRequired(reason: Self.message(error)) }
+            if !(error is CancellationError) { errors.append(Self.message(error)) }
         }
     }
 
@@ -318,6 +483,10 @@ final class SyncViewModel: ObservableObject {
     }
 
     var recoveryStatusKey: String {
+        if let summary = lastSummary?.recovery {
+            if summary.status == .readUnverified { return "Pending access check" }
+            if summary.status == .issues { return "Could not finish; retry required" }
+        }
         #if os(iOS)
         if #unavailable(iOS 27) { return "Requires iOS 27" }
         #endif
@@ -329,6 +498,22 @@ final class SyncViewModel: ObservableObject {
         if recoveryState.pendingItems.values.contains(where: { $0.requiresManualReview(at: Date()) }) { return "History pending manual review" }
         if recoveryState.initialImportCutoff != nil { return "History pending continuation" }
         return "Ready to sync"
+    }
+
+    func recoveryResultKey(_ summary: RecoverySyncSummary) -> String {
+        switch summary.status {
+        case .disabled: return recoveryState.enabled ? "Not checked" : "Disabled"
+        case .requiresIOS27: return "Requires iOS 27 and support for RMSSD HRV"
+        case .pausedNativeExport: return "Paused: WHOOP already exports HRV"
+        case .readUnverified: return "Pending access check"
+        case .issues: return "Could not finish; retry required"
+        case .configurationPending: return "Configuration pending"
+        default:
+            if summary.pending > 0 || summary.deferredAccess > 0 { return "Pending access check" }
+            if summary.written > 0 { return "Samples added or updated" }
+            if summary.unchanged + summary.skippedExternal > 0 { return "Data already existed" }
+            return "No data received"
+        }
     }
 
     func probeRecoverySchema() async {
@@ -418,6 +603,16 @@ final class SyncViewModel: ObservableObject {
     }
 
     private func refreshDiagnostics() {
+        repositoryAvailable = repository != nil && (try? repository?.ensureUsable()) != nil
+        guard repositoryAvailable else {
+            if repository?.loadError != nil { errors = [String(localized: "Local sync data unavailable; synchronization is blocked. Retry opening the app when data is accessible.")] }
+            return
+        }
+        setupCompleted = repository?.hasCompletedSyncSetup == true
+        pendingHistoryWindow = try? repository?.historyWindow()
+        hasPendingHistoryImport = repository?.hasPendingHistoryImport == true
+        historyCutoff = repository?.historyCutoff
+        historyPhase = repository?.historyPhase ?? ""
         requiresAccountBinding = repository?.requiresManualAccountBinding ?? false
         diagnostics = repository?.diagnostics() ?? .empty
         recoveryState = (try? repository?.recoveryState()) ?? RecoverySyncState()
@@ -470,15 +665,63 @@ final class SyncViewModel: ObservableObject {
 }
 
 #if targetEnvironment(simulator) && WHOOP_VALIDATION_BUILD && WHOOP_IOS27_SDK
+private final class IsolatedLoginTokenStore: TokenStoring {
+    private var bundle: TokenBundle?
+    func load() throws -> TokenBundle? { bundle }
+    func save(_ bundle: TokenBundle) throws { self.bundle = bundle }
+    func delete() throws { bundle = nil }
+}
+private final class IsolatedLoginURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        let data = Data(#"{"AuthenticationResult":{"AccessToken":"fixture-access","RefreshToken":"fixture-refresh","IdToken":"fixture-id","TokenType":"Bearer","ExpiresIn":3600}}"#.utf8)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data); client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
 /// UI state fixture: no network transport or HealthKit store, never compiled for a physical device.
-@MainActor private final class IsolatedRecoveryUIFixture: RecoveryConfiguring {
+@MainActor private final class IsolatedRecoveryUIFixture: RecoveryConfiguring, SyncRunning, SyncDataConfiguring, HistoryRunning, HealthKitAuthorizing, SyncSetupSaving {
     let repository: SyncRepository
-    var recoveryAvailable: Bool { true }
+    var recoveryAvailable: Bool {
+        if #available(iOS 27, *) { return true }
+        return false
+    }
     init(repository: SyncRepository) { self.repository = repository }
-    func authorizeRecovery() async throws -> RecoveryAuthorization { RecoveryAuthorization(sources: [], access: .unknown) }
+    func requestAuthorization() async throws {}
+    func saveSyncSetup(includeRecovery: Bool, fullReadConfirmed: Bool, whoopBundle: String?, now: Date) async throws {
+        var state = try repository.recoveryState()
+        state.enabled = includeRecovery
+        if includeRecovery {
+            state.configured = true; state.historyStartDate = state.historyStartDate ?? now.addingTimeInterval(-7 * 86400)
+            state.userConfirmedFullReadAccess = fullReadConfirmed; state.officialWhoopBundle = whoopBundle
+        }
+        try repository.saveSyncSetup(recovery: state)
+    }
+    func authorizeRecovery() async throws -> RecoveryAuthorization {
+        RecoveryAuthorization(sources: [], access: .unknown,
+            writeAuthorized: !ProcessInfo.processInfo.arguments.contains("-whoopHRVDeniedUITest"))
+    }
+    func authorizeSyncData(includeRecovery: Bool) async throws -> RecoveryAuthorization? {
+        includeRecovery ? try await authorizeRecovery() : nil
+    }
+    func synchronize() async throws -> SyncSummary {
+        let now = Date()
+        try repository.setSleepCheckpoint(now); try repository.setHeartRateCheckpoint(now, resolution: 6)
+        var state = try repository.recoveryState()
+        if state.enabled { state.lastDiscoveryEnd = now; try repository.commitRecoveryState(state) }
+        var summary = SyncSummary(); summary.stagesWritten = 2; summary.heartRateWritten = 3
+        summary.sleepResult = .updated; summary.heartRateResult = .updated
+        if state.enabled { summary.recovery.written = 1; summary.recovery.status = .completed }
+        return summary
+    }
+    func importHistory(start: Date?) async throws -> SyncSummary { try await importRecoveryHistory() }
     func configureRecovery(start: Date, fullReadConfirmed: Bool, whoopBundle: String?) async throws {
         guard fullReadConfirmed else { throw RecoverySyncError.readUnverified }
         var state = try repository.recoveryState()
+        state.accountKey = "isolated-ui-account"
         state.enabled = true; state.configured = true; state.historyStartDate = start; state.historyScopeLimited = true
         try repository.commitRecoveryState(state)
     }

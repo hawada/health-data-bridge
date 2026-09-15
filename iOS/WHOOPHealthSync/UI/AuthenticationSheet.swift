@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AuthenticationSheet: View {
     @ObservedObject var viewModel: SyncViewModel
+    var onConnected: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var password = ""
@@ -94,6 +95,7 @@ struct AuthenticationSheet: View {
 
         if case .authenticated = viewModel.authStatus {
             clearCredentials()
+            onConnected()
             dismiss()
         }
     }

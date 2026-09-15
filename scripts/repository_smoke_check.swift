@@ -250,6 +250,32 @@ struct RepositorySmokeCheck {
         try Data("{\"schemaVersion\":99}".utf8).write(to: futureURL)
         let future = SyncRepository(fileURL: futureURL)
         expect(future.loadError != nil, "Unknown schemas must block synchronization.")
+        let setupURL = directory.appendingPathComponent("setup-atomic.json")
+        let freshSetup = SyncRepository(fileURL: setupURL)
+        var setupWrites = 0
+        let atomic = SyncRepository(fileURL: setupURL, writeData: { data, target in
+            setupWrites += 1; try data.write(to: target, options: .atomic)
+        })
+        var enabled = RecoverySyncState(); enabled.enabled = true; enabled.configured = true
+        enabled.accountKey = "synthetic-setup-account"; enabled.historyStartDate = date(100)
+        try atomic.saveSyncSetup(recovery: enabled, accountKey: enabled.accountKey)
+        expect(setupWrites == 1, "Account, HRV and setup marker must use a single snapshot write.")
+        let committedBytes = try Data(contentsOf: setupURL)
+        let setupReload = SyncRepository(fileURL: setupURL)
+        try expect(try setupReload.recoveryState() == enabled && setupReload.hasCompletedSyncSetup, "Atomic setup survives reload.")
+        let brokenSetup = SyncRepository(fileURL: setupURL, writeData: { _, _ in throw SyncRepositoryError.storeWriteFailed })
+        var disabled = enabled; disabled.enabled = false
+        do { try brokenSetup.saveSyncSetup(recovery: disabled); fatalError("Setup write must fail") } catch {}
+        try expect(try brokenSetup.recoveryState() == enabled && Data(contentsOf: setupURL) == committedBytes, "Setup failure retains HRV, marker and bytes.")
+        expect(!freshSetup.hasCompletedSyncSetup, "A token/account alone is not configured progress.")
+        let unreadableWAL = setupURL.appendingPathExtension("recovery-wal")
+        try Data("{}".utf8).write(to: unreadableWAL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadableWAL.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: unreadableWAL.path) }
+        let protectedJournal = SyncRepository(fileURL: setupURL)
+        expect(protectedJournal.loadError != nil, "An unreadable WAL must block a readable main store rather than silently drop pending operations.")
+        do { try protectedJournal.completeSyncSetup(); fatalError("Protected journal must block setup writes") } catch {}
+        try expect(try Data(contentsOf: setupURL) == committedBytes, "An unreadable WAL never replaces the main store.")
         print("SyncRepository smoke check passed (migration, corruption, disk rollback, account separation)")
     }
 
