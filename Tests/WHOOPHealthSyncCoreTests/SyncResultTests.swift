@@ -2,6 +2,24 @@ import XCTest
 @testable import WHOOPHealthSyncCore
 
 final class SyncResultTests: XCTestCase {
+    func testPendingOrUncheckedPhasesRemainPartialWithoutGlobalErrors() {
+        var summary = SyncSummary()
+        XCTAssertTrue(summary.hasIncompleteResults)
+        summary.sleepResult = .updated; summary.heartRateResult = .existing
+        XCTAssertFalse(summary.hasIncompleteResults)
+        summary.recovery.status = .readUnverified
+        XCTAssertTrue(summary.hasIncompleteResults)
+        summary.recovery.status = .completed; summary.recovery.pending = 1
+        XCTAssertTrue(summary.hasIncompleteResults)
+        summary.recovery.pending = 0; summary.recovery.deferredAccess = 1
+        XCTAssertTrue(summary.hasIncompleteResults)
+        summary.recovery.deferredAccess = 0
+        XCTAssertFalse(summary.hasIncompleteResults)
+        summary.heartRateResult = .pendingAccess
+        XCTAssertTrue(summary.hasIncompleteResults)
+        XCTAssertTrue(summary.errors.isEmpty)
+    }
+
     func testEmptyWindowDoesNotReplaceConfirmedWritesOrAccessPending() {
         var accumulated = SyncSummary()
         accumulated.sleepResult = .updated; accumulated.stagesWritten = 3

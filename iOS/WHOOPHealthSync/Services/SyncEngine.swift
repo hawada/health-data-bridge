@@ -246,7 +246,7 @@ final class SyncEngine {
                 }
             }
             summary.elapsedSeconds = Date().timeIntervalSince(startedAt)
-            let status = summary.errors.isEmpty ? "success" : "partial"
+            let status = summary.hasIncompleteResults ? "partial" : "success"
             try repository.finishRun(run, summary: summary, status: status)
             recordEvent(runID: run, level: status == "success" ? "info" : "warning", category: "sync", message: "Fin de sync: \(status). Sueños descargados=\(summary.sleepsDownloaded), fases escritas=\(summary.stagesWritten), HR descargadas=\(summary.heartRateDownloaded), HR escritas=\(summary.heartRateWritten), errores=\(summary.errors.count).")
             AppLog.sync.info("Manual sync finished with status \(status, privacy: .public).")

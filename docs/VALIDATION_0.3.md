@@ -106,6 +106,41 @@ E01–E07. «Parcial» significa evidencia útil pero aceptación completa pendi
 
 ## Reproducción y aceptación física
 
+### Revisión adicional de la candidata ya publicada
+
+La implementación 0.3 estaba ya en el commit `4627e6c` al iniciar esta revisión.
+Se corrigió un criterio de resultado transversal: la ausencia de errores globales
+no basta para presentar una operación como completa si hay fases sin comprobar,
+lectura pendiente o recuperaciones pendientes. Panel, Actividad y estado persistido
+de la operación utilizan ahora el mismo criterio; las muestras confirmadas siguen
+mostrándose por separado. Una respuesta sin datos conserva su etiqueta específica,
+sin afirmar que se ha importado todo el histórico.
+
+La repetición del núcleo aprobó 86 tests, cero fallos, incluida una regresión de
+HRV pendiente sin errores globales. Las comprobaciones de servicios se repitieron
+con el nuevo criterio. La prueba de fronteras de lectura verifica además que el
+estado persistido de la operación sea parcial. Los resultados E01–E07 anteriores
+pertenecen a su ejecución original; no acreditan por sí solos este ajuste ni una
+instalación física nueva.
+
+Repetición adicional con fuentes estables, Xcode 27 y fixtures sintéticas:
+
+| Capa | Resultado del ajuste | Límites |
+| --- | --- | --- |
+| Núcleo | 86 aprobadas, 0 fallos | No sustituye HealthKit/WHOOP reales |
+| Servicios y capacidades | `verify_local.sh` aprobado completo | Incluye regresión de estado parcial bajo lectura limitada |
+| iOS 27 nativo/UI | 21 aprobadas, 2 omitidas, 0 fallos | Perfil QA existente; omisiones de protección física y caso exclusivo de iOS anterior |
+| iOS 26.4 nativo/UI | 12 aprobadas, 11 omitidas, 0 fallos | RMSSD/casos iOS 27 no disponibles; protección física omitida |
+| Release iPhone 0.3.0 (7) | Compilación y firma estricta aprobadas | Misma identidad/equipo; fixtures ausentes del binario; no instalado |
+
+El primer intento adicional de simulador falló al solaparse con la edición y
+utilizar un módulo del núcleo anterior. Se repitió con fuentes estables y solo esa
+pasada final se cuenta como aprobada. Los avisos de Xcode sobre compilación con
+código de salida cero y versión del depurador no produjeron fallos en la pasada
+final; ambos xcresult confirman cero fallos y ninguna advertencia de runtime.
+Este ajuste refuerza P07/P12 y sus resultados públicos; no cierra sus omisiones
+de aceptación física ni repite la comparación binaria E06.
+
 Comandos del núcleo/servicios arriba. Para los simuladores, seguir `TESTING.md` con
 el esquema `WHOOPHealthSync`, SDK 27, dispositivos QA aislados y
 `DEBUG WHOOP_IOS27_SDK WHOOP_VALIDATION_BUILD`; registrar omisiones. Para Release,

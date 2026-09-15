@@ -214,7 +214,7 @@ final class LiveSyncRuntime {
             let summary = try await importer.run(start: start)
             operationSummary = summary
             let run = try repository.createRejectedRun(startedAt: Date())
-            try repository.finishRun(run, summary: summary, status: summary.errors.isEmpty ? "success" : "partial")
+            try repository.finishRun(run, summary: summary, status: summary.hasIncompleteResults ? "partial" : "success")
             return summary
         } catch {
             var summary = importer.lastSummary

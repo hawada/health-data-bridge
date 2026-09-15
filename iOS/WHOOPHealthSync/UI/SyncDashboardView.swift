@@ -172,7 +172,7 @@ struct SyncDashboardView: View {
         if viewModel.needsInitialSetup { return "Set up your data" }
         if !viewModel.repositoryAvailable { return "Local data unavailable" }
         if !isAuthenticated && viewModel.setupCompleted { return "Reconnect WHOOP; saved progress retained" }
-        if let summary = viewModel.lastSummary { return summary.errors.isEmpty ? "Sync finished" : "Partial result; review pending data" }
+        if let summary = viewModel.lastSummary { return summary.hasIncompleteResults ? "Partial result; review pending data" : "Sync finished" }
         if !viewModel.errors.isEmpty || viewModel.diagnostics.lastRunStatus == "failed" || viewModel.diagnostics.lastRunStatus == "partial" { return "Pending access check or retry" }
         if viewModel.setupCompleted && viewModel.diagnostics.lastRunFinishedAt == nil &&
             viewModel.diagnostics.lastSleepCheckpoint == nil && viewModel.diagnostics.lastHeartRateCheckpoint == nil { return "Configuration saved; first sync pending" }

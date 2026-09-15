@@ -348,7 +348,7 @@ struct SyncActivityView: View {
 
             if let summary = viewModel.lastSummary {
                 Section("Latest sync summary") {
-                    localizedMetric("Result", summary.errors.isEmpty ? "Completed" : "Completed with issues")
+                    localizedMetric("Result", summary.hasIncompleteResults ? "Partial result; review pending data" : "Sync finished")
                     metric("Recovery HRV written", summary.recovery.written)
                     metric("Recovery HRV skipped", summary.recovery.skippedExternal)
                     metric("Recovery history pages", summary.recovery.pagesConfirmed)

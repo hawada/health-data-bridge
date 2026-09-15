@@ -138,6 +138,20 @@ public struct SyncSummary: Equatable, Sendable {
 
     public init() {}
 
+    /// A transport success alone cannot certify every selected data phase.
+    public var hasIncompleteResults: Bool {
+        guard errors.isEmpty else { return true }
+        let confirmed: [SyncDataResult] = [.updated, .existing, .noData]
+        guard confirmed.contains(sleepResult), confirmed.contains(heartRateResult) else { return true }
+        guard recovery.pending == 0, recovery.deferredAccess == 0 else { return true }
+        switch recovery.status {
+        case .disabled, .requiresIOS27, .pausedNativeExport, .completed, .historyLimited, .noData, .skippedExternal:
+            return false
+        default:
+            return true
+        }
+    }
+
     public mutating func merge(_ other: SyncSummary) {
         if other.sleepResult.priority > sleepResult.priority { sleepResult = other.sleepResult }
         if other.heartRateResult.priority > heartRateResult.priority { heartRateResult = other.heartRateResult }

@@ -556,6 +556,8 @@ struct SyncEngineSmokeCheck {
         let limited = try await engine.synchronize()
         expect(limited.stagesWritten == 0, "A night crossing the boundary must be deferred whole.")
         expect(limited.heartRateWritten == 1, "Only fully authorized HR buckets may be written.")
+        expect(limited.hasIncompleteResults, "Confirmed HR writes do not certify phases blocked by limited reading.")
+        expect(repository.diagnostics().lastRunStatus == "partial", "Limited reading must persist a partial run even without global errors.")
         try expect(try repository.deferredWindow(for: "sleep") != nil, "Deferred sleep must persist.")
         try expect(try repository.deferredWindow(for: "heartRate") != nil, "Deferred HR must persist.")
         health.sleepBoundary = nil; health.heartRateBoundary = nil
