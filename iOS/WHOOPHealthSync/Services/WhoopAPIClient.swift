@@ -300,6 +300,10 @@ final class WhoopAPIClient {
     }
 
     private static func isExpectedMissingDeepDiveSleep(_ error: Error) -> Bool {
+        // A night without the strap worn comes back as an empty sleep payload rather than a 404.
+        if let payloadError = error as? WhoopPayloadError {
+            return payloadError == .missingField("sleep events")
+        }
         guard let apiError = error as? WhoopAPIError else {
             return false
         }
