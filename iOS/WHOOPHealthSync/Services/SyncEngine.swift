@@ -204,7 +204,8 @@ final class SyncEngine {
             var plan = SyncWindowPlanner.makePlan(
                 now: startedAt,
                 checkpoints: checkpoints,
-                heartRateStepSeconds: heartRateStepSeconds
+                heartRateStepSeconds: heartRateStepSeconds,
+                heartRateRevisionLookbackHours: SyncWindowPlanner.liveHeartRateRevisionHours
             )
             if let window = historyWindow {
                 guard window.hasPositiveDuration, window.end <= startedAt else { throw RecoverySyncError.invalidRecord }

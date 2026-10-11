@@ -38,20 +38,28 @@ public struct IncrementalSyncPlan: Equatable, Sendable {
 }
 
 public enum SyncWindowPlanner {
+    /// WHOOP uploads band data late (minutes, sometimes hours after it was recorded). Live syncs re-read this
+    /// much recent heart rate so points that arrived after the last sync are still written; points already
+    /// in Health are skipped by the reconciler.
+    public static let liveHeartRateRevisionHours = 24
+
     public static func makePlan(
         now: Date,
         checkpoints: SyncCheckpointState,
         firstSyncLookbackDays: Int = 7,
         sleepRevisionLookbackDays: Int = 7,
-        heartRateStepSeconds: Int = 6
+        heartRateStepSeconds: Int = 6,
+        heartRateRevisionLookbackHours: Int = 0
     ) -> IncrementalSyncPlan {
         let firstLookback = TimeInterval(firstSyncLookbackDays * 24 * 60 * 60)
         let revisionLookback = TimeInterval(sleepRevisionLookbackDays * 24 * 60 * 60)
 
         let firstSyncStart = now.addingTimeInterval(-firstLookback)
         let heartRateOverlapSeconds = max(heartRateStepSeconds, checkpoints.lastHeartRateResolution ?? heartRateStepSeconds)
-        let heartRateStart = checkpoints.lastHeartRateEnd?
-            .addingTimeInterval(-TimeInterval(heartRateOverlapSeconds)) ?? firstSyncStart
+        let heartRateRevisionStart = now.addingTimeInterval(-TimeInterval(heartRateRevisionLookbackHours * 60 * 60))
+        let heartRateStart = checkpoints.lastHeartRateEnd.map {
+            min($0.addingTimeInterval(-TimeInterval(heartRateOverlapSeconds)), heartRateRevisionStart)
+        } ?? firstSyncStart
         let sleepStart = checkpoints.lastSleepQueryEnd ?? firstSyncStart
         let revisionStart = now.addingTimeInterval(-revisionLookback)
 
