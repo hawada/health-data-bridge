@@ -6,6 +6,12 @@ protocol WhoopAPIProviding {
     func fetchSleepActivities(userID: String, start: Date, end: Date) async throws -> [WhoopSleepActivity]
     func fetchSleepSession(activity: WhoopSleepActivity) async throws -> SleepSession
     func fetchHeartRate(userID: String, start: Date, end: Date, stepSeconds: Int) async throws -> [HeartRatePoint]
+    func fetchSkinTemperatures(userID: String, start: Date, end: Date) async throws -> SkinTemperatureFetch
+}
+
+struct SkinTemperatureFetch {
+    var readings: [SkinTemperatureReading]
+    var recoveryKeys: [String]
 }
 
 protocol HealthDataProviding {
@@ -16,6 +22,8 @@ protocol HealthDataProviding {
     func queryHeartRateSamples(from start: Date, to end: Date) async throws -> [HealthKitHeartRateSampleRecord]
     func saveHeartRatePoints(_ points: [HeartRatePoint], stepSeconds: Int) async throws
     func deleteHeartRateSamples(_ records: [HealthKitHeartRateSampleRecord]) async throws
+    /// Returns how many readings were newly written.
+    func saveSkinTemperatures(_ readings: [SkinTemperatureReading]) async throws -> Int
 }
 
 @MainActor
@@ -41,6 +49,12 @@ extension SyncPersisting {
 }
 extension HealthDataProviding {
     func authorizedBoundary(for type: String) async throws -> Date? { nil }
+    func saveSkinTemperatures(_ readings: [SkinTemperatureReading]) async throws -> Int { 0 }
+}
+extension WhoopAPIProviding {
+    func fetchSkinTemperatures(userID: String, start: Date, end: Date) async throws -> SkinTemperatureFetch {
+        SkinTemperatureFetch(readings: [], recoveryKeys: [])
+    }
 }
 
 extension WhoopAPIClient: WhoopAPIProviding {}
@@ -231,6 +245,9 @@ final class SyncEngine {
             summary.heartRateResult = heart.errors.isEmpty ? (heart.heartRateWritten > 0 ? .updated : heart.heartRateSkipped > 0 ? .existing : .noData) : .failed
             if heartRateBoundary.map({ $0 > plan.heartRateWindow.start }) == true { summary.heartRateResult = .pendingAccess }
             interruptedSummary = SyncSummary()
+            if historyWindow == nil {
+                await syncSkinTemperature(user: user, now: startedAt, runID: run)
+            }
             if let recoveryPipeline, historyWindow == nil {
                 do {
                     summary.recovery = try await recoveryPipeline.run(accountKey: WhoopRecovery.pseudonymousAccountKey(userID: user.id), mode: recoveryMode, maxPages: recoveryMode == .history ? Int.max : 20)
@@ -623,6 +640,19 @@ final class SyncEngine {
             rawMessage = error.localizedDescription
         }
         return SensitiveTextSanitizer.redact(rawMessage)
+    }
+
+    /// Best effort: skin temperature never fails the sync, it only logs what happened.
+    private func syncSkinTemperature(user: WhoopUser, now: Date, runID: UUID) async {
+        do {
+            let fetch = try await api.fetchSkinTemperatures(userID: user.id, start: now.addingTimeInterval(-14 * 86400), end: now)
+            let written = try await healthKit.saveSkinTemperatures(fetch.readings)
+            var message = "Temperatura piel: descargadas=\(fetch.readings.count), escritas=\(written)."
+            if fetch.readings.isEmpty { message += " Campos recovery: \(fetch.recoveryKeys.joined(separator: ", "))." }
+            recordEvent(runID: runID, level: fetch.readings.isEmpty ? "warning" : "info", category: "skin_temp", message: message)
+        } catch {
+            recordEvent(runID: runID, level: "warning", category: "skin_temp", message: "Temperatura piel no sincronizada: \(Self.message(error))")
+        }
     }
 
     private func recordEvent(runID: UUID?, level: String, category: String, message: String) {
