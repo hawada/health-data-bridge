@@ -658,7 +658,7 @@ final class SyncEngine {
         }
     }
 
-    /// Best effort: blood oxygen and respiratory rate never fail the sync, they only log what happened.
+    /// Best effort: blood oxygen, respiratory rate and HRV never fail the sync, they only log what happened.
     private func syncNightlyVitals(user: WhoopUser, now: Date, runID: UUID) async {
         do {
             let fetch = try await api.fetchNightlyVitals(userID: user.id, start: now.addingTimeInterval(-14 * 86400), end: now)
@@ -666,12 +666,12 @@ final class SyncEngine {
             let counts = NightlyVital.allCases.map { vital in
                 "\(vital.rawValue) descargadas=\(fetch.readings.filter { $0.vital == vital }.count), escritas=\(written[vital] ?? 0)"
             }
-            var message = "SpO2/FR: " + counts.joined(separator: "; ") + "."
+            var message = "SpO2/FR/HRV: " + counts.joined(separator: "; ") + "."
             let missing = NightlyVital.allCases.filter { vital in !fetch.readings.contains { $0.vital == vital } }
             if !missing.isEmpty { message += " Campos recovery/sueño: \(fetch.fieldNames.joined(separator: ", "))." }
             recordEvent(runID: runID, level: missing.isEmpty ? "info" : "warning", category: "nightly_vitals", message: message)
         } catch {
-            recordEvent(runID: runID, level: "warning", category: "nightly_vitals", message: "SpO2/FR no sincronizados: \(Self.message(error))")
+            recordEvent(runID: runID, level: "warning", category: "nightly_vitals", message: "SpO2/FR/HRV no sincronizados: \(Self.message(error))")
         }
     }
 

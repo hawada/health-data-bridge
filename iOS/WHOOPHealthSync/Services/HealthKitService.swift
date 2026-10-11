@@ -42,6 +42,7 @@ final class HealthKitService {
     private let bodyTemperatureType = HKQuantityType.quantityType(forIdentifier: .bodyTemperature)!
     private let oxygenSaturationType = HKQuantityType.quantityType(forIdentifier: .oxygenSaturation)!
     private let respiratoryRateType = HKQuantityType.quantityType(forIdentifier: .respiratoryRate)!
+    private let hrvSDNNType = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!
 
     func authorizedBoundary(for type: String) async throws -> Date? {
         #if os(iOS)
@@ -80,8 +81,10 @@ final class HealthKitService {
             throw HealthKitSyncError.healthDataUnavailable
         }
 
-        var shareTypes: Set<HKSampleType> = [sleepType, heartRateType, bodyTemperatureType, oxygenSaturationType, respiratoryRateType]
-        var readTypes: Set<HKObjectType> = [sleepType, heartRateType, bodyTemperatureType, oxygenSaturationType, respiratoryRateType]
+        var shareTypes: Set<HKSampleType> = [sleepType, heartRateType, bodyTemperatureType, oxygenSaturationType, respiratoryRateType,
+                                             hrvSDNNType]
+        var readTypes: Set<HKObjectType> = [sleepType, heartRateType, bodyTemperatureType, oxygenSaturationType, respiratoryRateType,
+                                            hrvSDNNType]
         #if WHOOP_IOS27_SDK && os(iOS)
         if #available(iOS 27, *), includeRecovery,
            let recovery = HKObjectType.quantityType(forIdentifier: .heartRateVariabilityRMSSD) {
@@ -218,19 +221,19 @@ final class HealthKitService {
         return samples.count
     }
 
-    /// Writes WHOOP blood oxygen and respiratory rate at the middle of each sleep, where Bevel counts them.
+    /// Writes WHOOP blood oxygen, respiratory rate and HRV at the middle of each sleep, where Bevel counts them.
     /// Nights this app already wrote are skipped (see `NightlyVitalReading.toWrite`).
     func saveNightlyVitals(_ readings: [NightlyVitalReading]) async throws -> [NightlyVital: Int] {
         var savedCounts: [NightlyVital: Int] = [:]
         for vital in NightlyVital.allCases {
             let nights = readings.filter { $0.vital == vital }
             guard !nights.isEmpty else { continue }
-            let type = vital == .oxygenSaturation ? oxygenSaturationType : respiratoryRateType
+            let type = quantityType(for: vital)
             if store.authorizationStatus(for: type) == .notDetermined {
                 try await store.requestAuthorization(toShare: [type], read: [type])
             }
             guard store.authorizationStatus(for: type) == .sharingAuthorized else {
-                throw HealthKitSyncError.writeAuthorizationDenied([vital == .oxygenSaturation ? "Blood Oxygen" : "Respiratory Rate"])
+                throw HealthKitSyncError.writeAuthorizationDenied([displayName(for: vital)])
             }
             let predicate = HKQuery.predicateForSamples(withStart: nights.map(\.sleep.start).min()!,
                                                         end: nights.map(\.sleep.end).max()!.addingTimeInterval(86400), options: [])
@@ -239,9 +242,7 @@ final class HealthKitService {
                 ($0.startDate, $0.metadata?[HKMetadataKeySyncIdentifier] as? String)
             }).map { reading in
                 HKQuantitySample(type: type,
-                                 quantity: vital == .oxygenSaturation
-                                    ? HKQuantity(unit: .percent(), doubleValue: reading.value / 100)
-                                    : HKQuantity(unit: .count().unitDivided(by: .minute()), doubleValue: reading.value),
+                                 quantity: quantity(for: reading),
                                  start: reading.date, end: reading.date,
                                  metadata: [HKMetadataKeySyncIdentifier: reading.syncIdentifier,
                                             HKMetadataKeySyncVersion: MetadataKeys.syncVersion,
@@ -254,6 +255,30 @@ final class HealthKitService {
             savedCounts[vital] = samples.count
         }
         return savedCounts
+    }
+
+    private func quantityType(for vital: NightlyVital) -> HKQuantityType {
+        switch vital {
+        case .oxygenSaturation: oxygenSaturationType
+        case .respiratoryRate: respiratoryRateType
+        case .heartRateVariability: hrvSDNNType
+        }
+    }
+
+    private func displayName(for vital: NightlyVital) -> String {
+        switch vital {
+        case .oxygenSaturation: "Blood Oxygen"
+        case .respiratoryRate: "Respiratory Rate"
+        case .heartRateVariability: "Heart Rate Variability"
+        }
+    }
+
+    private func quantity(for reading: NightlyVitalReading) -> HKQuantity {
+        switch reading.vital {
+        case .oxygenSaturation: HKQuantity(unit: .percent(), doubleValue: reading.value / 100)
+        case .respiratoryRate: HKQuantity(unit: .count().unitDivided(by: .minute()), doubleValue: reading.value)
+        case .heartRateVariability: HKQuantity(unit: .secondUnit(with: .milli), doubleValue: reading.value)
+        }
     }
 
     private func runSampleQuery<T: HKSample>(sampleType: HKSampleType, predicate: NSPredicate) async throws -> [T] {

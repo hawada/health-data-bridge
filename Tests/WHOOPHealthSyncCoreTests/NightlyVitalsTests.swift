@@ -31,6 +31,15 @@ final class NightlyVitalsTests: XCTestCase {
         XCTAssertEqual(readings.first { $0.vital == .oxygenSaturation }?.value ?? 0, 95.7, accuracy: 0.0001)
         XCTAssertEqual(readings.first { $0.vital == .respiratoryRate }?.value, 12.9)
     }
+    func testReadsHRVFromSecondsOrMilliseconds() {
+        let seconds = WhoopNightlyVitalsAdapter.readings(fromCyclesJSON: ["records": [record(recoveryFields: ["hrv_rmssd": 0.0623])]])
+        XCTAssertEqual(seconds.first { $0.vital == .heartRateVariability }?.value ?? 0, 62.3, accuracy: 0.0001)
+        XCTAssertEqual(seconds.first { $0.vital == .heartRateVariability }?.syncIdentifier, "whoop-hrv-sdnn:42")
+        let millis = WhoopNightlyVitalsAdapter.readings(fromCyclesJSON: ["records": [
+            record(recoveryFields: ["score": ["hrv_rmssd_milli": 48.5]])
+        ]])
+        XCTAssertEqual(millis.first { $0.vital == .heartRateVariability }?.value, 48.5)
+    }
     func testSkipsMissingImplausibleIncompleteAndNaps() {
         let records = [record(id: 1, recoveryFields: [:], sleepFields: [:]),
                        record(id: 2, recoveryFields: ["spo2_percentage": 140], sleepFields: ["respiratory_rate": true]),

@@ -1,24 +1,37 @@
 import Foundation
 import CoreFoundation
 
-/// Overnight WHOOP vitals written to Health as Blood Oxygen and Respiratory Rate.
+/// Overnight WHOOP vitals written to Health as Blood Oxygen, Respiratory Rate and Heart Rate Variability.
 public enum NightlyVital: String, CaseIterable, Sendable {
     case oxygenSaturation = "spo2"
     case respiratoryRate = "resp-rate"
+    /// WHOOP's RMSSD, written to Health's classic HRV type (SDNN), which Bevel's SDNN setting reads.
+    case heartRateVariability = "hrv-sdnn"
 
     /// The private field names are not documented, so a few likely names are accepted.
     public var candidateKeys: [String] {
         switch self {
         case .oxygenSaturation: ["spo2_percentage", "spo2", "spo2_percent", "blood_oxygen", "oxygen_saturation"]
         case .respiratoryRate: ["respiratory_rate", "resp_rate", "respiratory_rate_bpm", "respiration_rate"]
+        case .heartRateVariability: ["hrv_rmssd_milli", "hrv_rmssd"]
         }
     }
 
-    /// Percent for oxygen saturation, breaths per minute for respiratory rate.
+    /// Percent for oxygen saturation, breaths per minute for respiratory rate, milliseconds for HRV.
     public var plausibleRange: ClosedRange<Double> {
         switch self {
         case .oxygenSaturation: 80...100
         case .respiratoryRate: 5...40
+        case .heartRateVariability: 5...300
+        }
+    }
+
+    /// WHOOP sends SpO2 as a fraction in some payloads and HRV in seconds (`hrv_rmssd`).
+    func normalized(_ value: Double) -> Double {
+        switch self {
+        case .oxygenSaturation where value > 0 && value <= 1: value * 100
+        case .heartRateVariability where value > 0 && value < 1: value * 1000
+        default: value
         }
     }
 }
@@ -48,7 +61,7 @@ extension NightlyVitalReading {
     }
 }
 
-/// Reads blood oxygen and respiratory rate from the private cycles/details payload already used for
+/// Reads blood oxygen, respiratory rate and HRV from the private cycles/details payload already used for
 /// sleep and recovery. Each value is looked up on the recovery and on the linked sleep (and their `score`
 /// objects); values outside a plausible range are dropped rather than written.
 public enum WhoopNightlyVitalsAdapter {
@@ -62,9 +75,9 @@ public enum WhoopNightlyVitalsAdapter {
                   let range = WhoopPayloadAdapters.timeRange(from: sleep["during"]), range.end > range.start else { continue }
             let sources = [recovery, recovery["score"] as? [String: Any], sleep, sleep["score"] as? [String: Any]].compactMap { $0 }
             for vital in NightlyVital.allCases {
-                guard var value = sources.lazy.flatMap({ source in vital.candidateKeys.lazy.compactMap { number(source[$0]) } }).first
+                guard let raw = sources.lazy.flatMap({ source in vital.candidateKeys.lazy.compactMap { number(source[$0]) } }).first
                 else { continue }
-                if vital == .oxygenSaturation, value > 0, value <= 1 { value *= 100 }
+                let value = vital.normalized(raw)
                 guard vital.plausibleRange.contains(value) else { continue }
                 let reading = NightlyVitalReading(vital: vital, cycleID: cycleID, value: value, sleep: range)
                 byID[reading.syncIdentifier] = reading
