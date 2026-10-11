@@ -395,7 +395,8 @@ final class SyncViewModel: ObservableObject {
         let plan = SyncWindowPlanner.makePlan(
             now: now,
             checkpoints: checkpoints,
-            heartRateStepSeconds: preferredHeartRateStepSeconds
+            heartRateStepSeconds: preferredHeartRateStepSeconds,
+            heartRateRevisionLookbackHours: SyncWindowPlanner.liveHeartRateRevisionHours
         )
         let sleepWindow = SyncWindowPlanner.sleepQueryWindow(for: plan)
         return NextSyncPreview(

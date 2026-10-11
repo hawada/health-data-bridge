@@ -15,6 +15,7 @@ struct CoreChecks {
         testHeartRateOwnDifferentResolutionDoesNotBlockWrite()
         testIncrementalPlannerBacksUpOneHeartRateBucket()
         testIncrementalPlannerUsesStoredHeartRateResolutionOverlap()
+        testIncrementalPlannerRereadsRecentHeartRate()
         testHeartRateChunksCoverWindowWithoutOverlap()
         testSleepQueryWindowIncludesRevisionLookback()
         try testWhoopUserAndCyclePayloadParsing()
@@ -284,6 +285,16 @@ struct CoreChecks {
         )
 
         expect(plan.heartRateWindow == range(440, 1_000), "HR should back up by the stored effective resolution when it is wider than the preferred step.")
+    }
+
+    static func testIncrementalPlannerRereadsRecentHeartRate() {
+        let now = date(100_000)
+        let recent = SyncCheckpointState(lastHeartRateEnd: date(99_000), lastSleepQueryEnd: date(99_000))
+        let plan = SyncWindowPlanner.makePlan(now: now, checkpoints: recent, heartRateStepSeconds: 6, heartRateRevisionLookbackHours: 24)
+        expect(plan.heartRateWindow == range(100_000 - 86_400, 100_000), "Live HR should re-read the last 24 hours for late WHOOP uploads.")
+        let old = SyncCheckpointState(lastHeartRateEnd: date(1_000), lastSleepQueryEnd: date(1_000))
+        let catchUp = SyncWindowPlanner.makePlan(now: now, checkpoints: old, heartRateStepSeconds: 6, heartRateRevisionLookbackHours: 24)
+        expect(catchUp.heartRateWindow == range(994, 100_000), "An older checkpoint should still be resumed from.")
     }
 
     static func testHeartRateChunksCoverWindowWithoutOverlap() {
