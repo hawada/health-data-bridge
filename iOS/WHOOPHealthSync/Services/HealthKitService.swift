@@ -40,6 +40,8 @@ final class HealthKitService {
     private let heartRateType = HealthKitSampleFactory.heartRateType
     private let heartRateUnit = HealthKitSampleFactory.heartRateUnit
     private let bodyTemperatureType = HKQuantityType.quantityType(forIdentifier: .bodyTemperature)!
+    private let oxygenSaturationType = HKQuantityType.quantityType(forIdentifier: .oxygenSaturation)!
+    private let respiratoryRateType = HKQuantityType.quantityType(forIdentifier: .respiratoryRate)!
 
     func authorizedBoundary(for type: String) async throws -> Date? {
         #if os(iOS)
@@ -78,8 +80,8 @@ final class HealthKitService {
             throw HealthKitSyncError.healthDataUnavailable
         }
 
-        var shareTypes: Set<HKSampleType> = [sleepType, heartRateType, bodyTemperatureType]
-        var readTypes: Set<HKObjectType> = [sleepType, heartRateType, bodyTemperatureType]
+        var shareTypes: Set<HKSampleType> = [sleepType, heartRateType, bodyTemperatureType, oxygenSaturationType, respiratoryRateType]
+        var readTypes: Set<HKObjectType> = [sleepType, heartRateType, bodyTemperatureType, oxygenSaturationType, respiratoryRateType]
         #if WHOOP_IOS27_SDK && os(iOS)
         if #available(iOS 27, *), includeRecovery,
            let recovery = HKObjectType.quantityType(forIdentifier: .heartRateVariabilityRMSSD) {
@@ -214,6 +216,44 @@ final class HealthKitService {
         try await save(samples)
         AppLog.healthKit.info("Saved \(samples.count) skin temperature samples to HealthKit.")
         return samples.count
+    }
+
+    /// Writes WHOOP blood oxygen and respiratory rate at the middle of each sleep, where Bevel counts them.
+    /// Nights already covered inside the sleep are skipped (see `NightlyVitalReading.toWrite`).
+    func saveNightlyVitals(_ readings: [NightlyVitalReading]) async throws -> [NightlyVital: Int] {
+        var savedCounts: [NightlyVital: Int] = [:]
+        for vital in NightlyVital.allCases {
+            let nights = readings.filter { $0.vital == vital }
+            guard !nights.isEmpty else { continue }
+            let type = vital == .oxygenSaturation ? oxygenSaturationType : respiratoryRateType
+            if store.authorizationStatus(for: type) == .notDetermined {
+                try await store.requestAuthorization(toShare: [type], read: [type])
+            }
+            guard store.authorizationStatus(for: type) == .sharingAuthorized else {
+                throw HealthKitSyncError.writeAuthorizationDenied([vital == .oxygenSaturation ? "Blood Oxygen" : "Respiratory Rate"])
+            }
+            let predicate = HKQuery.predicateForSamples(withStart: nights.map(\.sleep.start).min()!,
+                                                        end: nights.map(\.sleep.end).max()!.addingTimeInterval(86400), options: [])
+            let existing: [HKQuantitySample] = try await runSampleQuery(sampleType: type, predicate: predicate)
+            let samples = NightlyVitalReading.toWrite(nights, existing: existing.map {
+                ($0.startDate, $0.metadata?[HKMetadataKeySyncIdentifier] as? String)
+            }).map { reading in
+                HKQuantitySample(type: type,
+                                 quantity: vital == .oxygenSaturation
+                                    ? HKQuantity(unit: .percent(), doubleValue: reading.value / 100)
+                                    : HKQuantity(unit: .count().unitDivided(by: .minute()), doubleValue: reading.value),
+                                 start: reading.date, end: reading.date,
+                                 metadata: [HKMetadataKeySyncIdentifier: reading.syncIdentifier,
+                                            HKMetadataKeySyncVersion: MetadataKeys.syncVersion,
+                                            MetadataKeys.adapterVersion: MetadataKeys.appVersion,
+                                            "com.whoophealthsync.measurement": "WHOOP \(vital.rawValue)"])
+            }
+            guard !samples.isEmpty else { continue }
+            try await save(samples)
+            AppLog.healthKit.info("Saved \(samples.count) \(vital.rawValue, privacy: .public) samples to HealthKit.")
+            savedCounts[vital] = samples.count
+        }
+        return savedCounts
     }
 
     private func runSampleQuery<T: HKSample>(sampleType: HKSampleType, predicate: NSPredicate) async throws -> [T] {

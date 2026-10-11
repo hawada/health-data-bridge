@@ -7,11 +7,7 @@ protocol WhoopAPIProviding {
     func fetchSleepSession(activity: WhoopSleepActivity) async throws -> SleepSession
     func fetchHeartRate(userID: String, start: Date, end: Date, stepSeconds: Int) async throws -> [HeartRatePoint]
     func fetchSkinTemperatures(userID: String, start: Date, end: Date) async throws -> SkinTemperatureFetch
-}
-
-struct SkinTemperatureFetch {
-    var readings: [SkinTemperatureReading]
-    var recoveryKeys: [String]
+    func fetchNightlyVitals(userID: String, start: Date, end: Date) async throws -> NightlyVitalsFetch
 }
 
 protocol HealthDataProviding {
@@ -24,6 +20,8 @@ protocol HealthDataProviding {
     func deleteHeartRateSamples(_ records: [HealthKitHeartRateSampleRecord]) async throws
     /// Returns how many readings were newly written.
     func saveSkinTemperatures(_ readings: [SkinTemperatureReading]) async throws -> Int
+    /// Returns how many readings of each vital were newly written.
+    func saveNightlyVitals(_ readings: [NightlyVitalReading]) async throws -> [NightlyVital: Int]
 }
 
 @MainActor
@@ -50,10 +48,14 @@ extension SyncPersisting {
 extension HealthDataProviding {
     func authorizedBoundary(for type: String) async throws -> Date? { nil }
     func saveSkinTemperatures(_ readings: [SkinTemperatureReading]) async throws -> Int { 0 }
+    func saveNightlyVitals(_ readings: [NightlyVitalReading]) async throws -> [NightlyVital: Int] { [:] }
 }
 extension WhoopAPIProviding {
     func fetchSkinTemperatures(userID: String, start: Date, end: Date) async throws -> SkinTemperatureFetch {
         SkinTemperatureFetch(readings: [], recoveryKeys: [])
+    }
+    func fetchNightlyVitals(userID: String, start: Date, end: Date) async throws -> NightlyVitalsFetch {
+        NightlyVitalsFetch(readings: [], fieldNames: [])
     }
 }
 
@@ -247,6 +249,7 @@ final class SyncEngine {
             interruptedSummary = SyncSummary()
             if historyWindow == nil {
                 await syncSkinTemperature(user: user, now: startedAt, runID: run)
+                await syncNightlyVitals(user: user, now: startedAt, runID: run)
             }
             if let recoveryPipeline, historyWindow == nil {
                 do {
@@ -652,6 +655,23 @@ final class SyncEngine {
             recordEvent(runID: runID, level: fetch.readings.isEmpty ? "warning" : "info", category: "skin_temp", message: message)
         } catch {
             recordEvent(runID: runID, level: "warning", category: "skin_temp", message: "Temperatura piel no sincronizada: \(Self.message(error))")
+        }
+    }
+
+    /// Best effort: blood oxygen and respiratory rate never fail the sync, they only log what happened.
+    private func syncNightlyVitals(user: WhoopUser, now: Date, runID: UUID) async {
+        do {
+            let fetch = try await api.fetchNightlyVitals(userID: user.id, start: now.addingTimeInterval(-14 * 86400), end: now)
+            let written = try await healthKit.saveNightlyVitals(fetch.readings)
+            let counts = NightlyVital.allCases.map { vital in
+                "\(vital.rawValue) descargadas=\(fetch.readings.filter { $0.vital == vital }.count), escritas=\(written[vital] ?? 0)"
+            }
+            var message = "SpO2/FR: " + counts.joined(separator: "; ") + "."
+            let missing = NightlyVital.allCases.filter { vital in !fetch.readings.contains { $0.vital == vital } }
+            if !missing.isEmpty { message += " Campos recovery/sueño: \(fetch.fieldNames.joined(separator: ", "))." }
+            recordEvent(runID: runID, level: missing.isEmpty ? "info" : "warning", category: "nightly_vitals", message: message)
+        } catch {
+            recordEvent(runID: runID, level: "warning", category: "nightly_vitals", message: "SpO2/FR no sincronizados: \(Self.message(error))")
         }
     }
 

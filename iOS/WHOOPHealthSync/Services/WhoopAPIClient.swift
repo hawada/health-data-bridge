@@ -7,6 +7,18 @@ struct WhoopPrivateAPIConfiguration {
     var requestTimeoutSeconds: TimeInterval = 30
 }
 
+/// Results of the cycles payload reads used by the best-effort sync steps. They live next to the client
+/// so the API smoke check compiles without the sync engine.
+struct SkinTemperatureFetch {
+    var readings: [SkinTemperatureReading]
+    var recoveryKeys: [String]
+}
+
+struct NightlyVitalsFetch {
+    var readings: [NightlyVitalReading]
+    var fieldNames: [String]
+}
+
 final class WhoopAPIClient {
     private let auth: WhoopAuthService
     private let session: URLSession
@@ -79,6 +91,14 @@ final class WhoopAPIClient {
         ])
         return SkinTemperatureFetch(readings: WhoopSkinTemperatureAdapter.readings(fromCyclesJSON: json),
                                     recoveryKeys: WhoopSkinTemperatureAdapter.recoveryKeys(fromCyclesJSON: json))
+    }
+
+    func fetchNightlyVitals(userID: String, start: Date, end: Date) async throws -> NightlyVitalsFetch {
+        let json = try await getJSON(path: "/core-details-bff/v0/cycles/details", query: [
+            "id": userID, "startTime": Self.isoString(start), "endTime": Self.isoString(end), "limit": "50"
+        ])
+        return NightlyVitalsFetch(readings: WhoopNightlyVitalsAdapter.readings(fromCyclesJSON: json),
+                                  fieldNames: WhoopNightlyVitalsAdapter.fieldNames(fromCyclesJSON: json))
     }
 
     func fetchCurrentUser() async throws -> WhoopUser {
