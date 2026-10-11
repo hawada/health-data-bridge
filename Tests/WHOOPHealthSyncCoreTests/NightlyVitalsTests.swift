@@ -41,12 +41,11 @@ final class NightlyVitalsTests: XCTestCase {
         XCTAssertEqual(WhoopNightlyVitalsAdapter.fieldNames(fromCyclesJSON: ["records": [record(sleepFields: ["score": ["x": 1]])]]),
                        ["activity_id", "during", "is_nap", "score", "score.x", "spo2_percentage", "state", "user_id"])
     }
-    func testToWriteSkipsCoveredNightsButNotWakeTimeSamples() throws {
+    func testToWriteSkipsOnlyNightsThisAppAlreadyWrote() throws {
         let reading = try XCTUnwrap(WhoopNightlyVitalsAdapter.readings(fromCyclesJSON: ["records": [record()]]).first)
         let end = reading.sleep.end
-        XCTAssertEqual(NightlyVitalReading.toWrite([reading], existing: [(end, nil), (end.addingTimeInterval(60), nil)]), [reading])
-        XCTAssertTrue(NightlyVitalReading.toWrite([reading], existing: [(end.addingTimeInterval(-3600), nil)]).isEmpty)
-        XCTAssertTrue(NightlyVitalReading.toWrite([reading], existing: [(reading.sleep.start, nil)]).isEmpty)
+        XCTAssertEqual(NightlyVitalReading.toWrite([reading], existing: [(end.addingTimeInterval(-0.157), nil),
+                                                                         (reading.date, "other-app:1")]), [reading])
         XCTAssertTrue(NightlyVitalReading.toWrite([reading], existing: [(end.addingTimeInterval(86400), reading.syncIdentifier)]).isEmpty)
     }
 }

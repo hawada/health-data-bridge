@@ -39,15 +39,12 @@ public struct NightlyVitalReading: Equatable, Sendable {
 }
 
 extension NightlyVitalReading {
-    /// A night is already covered when this app wrote it, or when any sample of the same type starts
-    /// inside the sleep. Samples stamped exactly at wake time (WHOOP's own feed, earlier manual imports)
-    /// do not count: Bevel ignores them, so the mid-sleep reading is still written.
+    /// A night is already covered only when this app wrote it. Other sources' samples never count:
+    /// WHOOP's own feed and earlier manual imports sit at wake time (to the second, while the sleep end
+    /// carries milliseconds), where Bevel ignores them, so the mid-sleep reading is still written.
     public static func toWrite(_ readings: [NightlyVitalReading], existing: [(start: Date, syncIdentifier: String?)]) -> [NightlyVitalReading] {
         let written = Set(existing.compactMap(\.syncIdentifier))
-        return readings.filter { reading in
-            !written.contains(reading.syncIdentifier)
-                && !existing.contains { $0.start >= reading.sleep.start && $0.start < reading.sleep.end }
-        }
+        return readings.filter { !written.contains($0.syncIdentifier) }
     }
 }
 

@@ -219,7 +219,7 @@ final class HealthKitService {
     }
 
     /// Writes WHOOP blood oxygen and respiratory rate at the middle of each sleep, where Bevel counts them.
-    /// Nights already covered inside the sleep are skipped (see `NightlyVitalReading.toWrite`).
+    /// Nights this app already wrote are skipped (see `NightlyVitalReading.toWrite`).
     func saveNightlyVitals(_ readings: [NightlyVitalReading]) async throws -> [NightlyVital: Int] {
         var savedCounts: [NightlyVital: Int] = [:]
         for vital in NightlyVital.allCases {
