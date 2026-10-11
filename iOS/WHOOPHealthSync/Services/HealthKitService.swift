@@ -39,6 +39,7 @@ final class HealthKitService {
     private let sleepType = HealthKitSampleFactory.sleepType
     private let heartRateType = HealthKitSampleFactory.heartRateType
     private let heartRateUnit = HealthKitSampleFactory.heartRateUnit
+    private let bodyTemperatureType = HKQuantityType.quantityType(forIdentifier: .bodyTemperature)!
 
     func authorizedBoundary(for type: String) async throws -> Date? {
         #if os(iOS)
@@ -77,8 +78,8 @@ final class HealthKitService {
             throw HealthKitSyncError.healthDataUnavailable
         }
 
-        var shareTypes: Set<HKSampleType> = [sleepType, heartRateType]
-        var readTypes: Set<HKObjectType> = [sleepType, heartRateType]
+        var shareTypes: Set<HKSampleType> = [sleepType, heartRateType, bodyTemperatureType]
+        var readTypes: Set<HKObjectType> = [sleepType, heartRateType, bodyTemperatureType]
         #if WHOOP_IOS27_SDK && os(iOS)
         if #available(iOS 27, *), includeRecovery,
            let recovery = HKObjectType.quantityType(forIdentifier: .heartRateVariabilityRMSSD) {
@@ -179,6 +180,40 @@ final class HealthKitService {
         guard !records.isEmpty else { return }
         try await delete(records.map(\.sample))
         AppLog.healthKit.info("Deleted \(records.count) app-owned heart-rate samples from HealthKit.")
+    }
+
+    /// Writes WHOOP skin temperature as Body Temperature (Bevel can use it in place of wrist temperature).
+    /// A night that already has a body temperature within an hour (from this app or an earlier manual import)
+    /// is skipped, so repeated syncs never duplicate.
+    func saveSkinTemperatures(_ readings: [SkinTemperatureReading]) async throws -> Int {
+        guard !readings.isEmpty else { return 0 }
+        if store.authorizationStatus(for: bodyTemperatureType) == .notDetermined {
+            try await store.requestAuthorization(toShare: [bodyTemperatureType], read: [bodyTemperatureType])
+        }
+        guard store.authorizationStatus(for: bodyTemperatureType) == .sharingAuthorized else {
+            throw HealthKitSyncError.writeAuthorizationDenied(["Body Temperature"])
+        }
+        let dates = readings.map(\.date)
+        let predicate = HKQuery.predicateForSamples(withStart: dates.min()!.addingTimeInterval(-3600),
+                                                    end: dates.max()!.addingTimeInterval(3600), options: [])
+        let existing: [HKQuantitySample] = try await runSampleQuery(sampleType: bodyTemperatureType, predicate: predicate)
+        let written = Set(existing.compactMap { $0.metadata?[HKMetadataKeySyncIdentifier] as? String })
+        let samples = readings.filter { reading in
+            !written.contains(reading.syncIdentifier)
+                && !existing.contains { abs($0.startDate.timeIntervalSince(reading.date)) < 3600 }
+        }.map { reading in
+            HKQuantitySample(type: bodyTemperatureType,
+                             quantity: HKQuantity(unit: .degreeCelsius(), doubleValue: reading.celsius),
+                             start: reading.date, end: reading.date,
+                             metadata: [HKMetadataKeySyncIdentifier: reading.syncIdentifier,
+                                        HKMetadataKeySyncVersion: MetadataKeys.syncVersion,
+                                        MetadataKeys.adapterVersion: MetadataKeys.appVersion,
+                                        "com.whoophealthsync.measurement": "WHOOP skin temperature"])
+        }
+        guard !samples.isEmpty else { return 0 }
+        try await save(samples)
+        AppLog.healthKit.info("Saved \(samples.count) skin temperature samples to HealthKit.")
+        return samples.count
     }
 
     private func runSampleQuery<T: HKSample>(sampleType: HKSampleType, predicate: NSPredicate) async throws -> [T] {

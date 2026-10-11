@@ -73,6 +73,14 @@ final class WhoopAPIClient {
         return sections.joined(separator: "\n\n")
     }
 
+    func fetchSkinTemperatures(userID: String, start: Date, end: Date) async throws -> SkinTemperatureFetch {
+        let json = try await getJSON(path: "/core-details-bff/v0/cycles/details", query: [
+            "id": userID, "startTime": Self.isoString(start), "endTime": Self.isoString(end), "limit": "50"
+        ])
+        return SkinTemperatureFetch(readings: WhoopSkinTemperatureAdapter.readings(fromCyclesJSON: json),
+                                    recoveryKeys: WhoopSkinTemperatureAdapter.recoveryKeys(fromCyclesJSON: json))
+    }
+
     func fetchCurrentUser() async throws -> WhoopUser {
         let json = try await getJSON(path: "/auth-service/v2/user", query: [:])
         let userID = try WhoopPayloadAdapters.userID(from: json)
