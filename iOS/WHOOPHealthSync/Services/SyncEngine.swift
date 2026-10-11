@@ -387,7 +387,8 @@ final class SyncEngine {
                     let reconciliation = SleepCoverageReconciler.plan(
                         session: session,
                         existingSamples: existingSamples.map(\.existing),
-                        fingerprintChanged: fingerprintChanged
+                        fingerprintChanged: fingerprintChanged,
+                        deferToOtherSources: false
                     )
 
                     let deleteIDs = Set(reconciliation.ownSamplesToDelete.map(\.id))

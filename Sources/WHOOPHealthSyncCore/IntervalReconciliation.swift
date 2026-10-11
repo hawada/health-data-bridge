@@ -144,11 +144,15 @@ public enum SleepCoverageReconciler {
     public static func plan(
         session: SleepSession,
         existingSamples: [ExistingSleepSample],
-        fingerprintChanged: Bool
+        fingerprintChanged: Bool,
+        deferToOtherSources: Bool = true
     ) -> SleepReconciliationPlan {
         let fingerprint = SleepFingerprint.make(for: session)
         let sessionRange = TimeRange(start: session.start, end: session.end)
-        let externalDetailed = existingSamples.filter { !$0.isOwnedByApp && $0.value.isDetailedStage }
+        // When false, other apps' stages (e.g. a ring worn the same night) no longer suppress WHOOP's.
+        let externalDetailed = deferToOtherSources
+            ? existingSamples.filter { !$0.isOwnedByApp && $0.value.isDetailedStage }
+            : []
         let externalCoverage = IntervalAlgebra.union(externalDetailed.map(\.range))
 
         let ownSamplesToDelete = existingSamples.filter { sample in

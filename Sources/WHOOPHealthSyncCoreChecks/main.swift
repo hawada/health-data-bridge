@@ -5,6 +5,7 @@ import WHOOPHealthSyncCore
 struct CoreChecks {
     static func main() throws {
         try testExternalDetailedSleepBlocksWhoopStages()
+        try testExternalDetailedSleepIgnoredWhenNotDeferring()
         try testGenericSleepDoesNotBlockDetailedWhoopStages()
         try testPartialExternalDetailedCoverageOnlyWritesGaps()
         try testOwnSleepSampleIsDeletedWhenExternalCoverageAppearsLater()
@@ -55,6 +56,33 @@ struct CoreChecks {
 
         expect(plan.fragmentsToWrite.count == 0, "External detailed sleep should block WHOOP fragments.")
         expect(plan.skippedDetailedFragments == 2, "Both WHOOP phases should be counted as covered.")
+    }
+
+    static func testExternalDetailedSleepIgnoredWhenNotDeferring() throws {
+        let session = try normalizedSession(stages: [
+            stage(0, 60, .core),
+            stage(60, 120, .rem)
+        ])
+        let existing = [
+            ExistingSleepSample(
+                id: "ring-1",
+                range: range(0, 120),
+                value: .asleepCore,
+                isOwnedByApp: false,
+                whoopSleepID: nil,
+                syncIdentifier: nil
+            )
+        ]
+
+        let plan = SleepCoverageReconciler.plan(
+            session: session,
+            existingSamples: existing,
+            fingerprintChanged: false,
+            deferToOtherSources: false
+        )
+
+        expect(plan.fragmentsToWrite.count == 2, "WHOOP stages should be written despite another app's stages.")
+        expect(plan.skippedDetailedFragments == 0, "Nothing should be skipped when not deferring.")
     }
 
     static func testGenericSleepDoesNotBlockDetailedWhoopStages() throws {
