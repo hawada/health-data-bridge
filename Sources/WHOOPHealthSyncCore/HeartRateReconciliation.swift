@@ -105,7 +105,11 @@ public enum HeartRateCoverageReconciler {
                 index += 1
             }
 
-            let external = overlaps.filter { !$0.isOwnedByApp }
+            // Only external readings at least as fine as this bucket count as duplicates. Wider external
+            // samples (WHOOP's own Health feed writes multi-minute sleep averages) must not hide the finer points.
+            let external = overlaps.filter {
+                !$0.isOwnedByApp && $0.range.end.timeIntervalSince($0.range.start) <= TimeInterval(stepSeconds)
+            }
             let owned = overlaps.filter(\.isOwnedByApp)
 
             if !external.isEmpty {

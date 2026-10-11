@@ -13,6 +13,7 @@ struct CoreChecks {
         testHeartRateInstantExternalSampleBlocksWrite()
         testHeartRateOwnEquivalentSampleIsIdempotent()
         testHeartRateOwnDifferentResolutionDoesNotBlockWrite()
+        testHeartRateWideExternalSampleDoesNotBlockFinerPoints()
         testIncrementalPlannerBacksUpOneHeartRateBucket()
         testIncrementalPlannerUsesStoredHeartRateResolutionOverlap()
         testIncrementalPlannerRereadsRecentHeartRate()
@@ -252,6 +253,17 @@ struct CoreChecks {
         )
         expect(upgradePlan.pointsToWrite == sixSecondPoints, "Wide 60s own coverage should not block finer 6s points.")
         expect(upgradePlan.ownSamplesToDelete.map(\.id) == ["own-60"], "Stale wide own sample should be removed once when upgrading to finer resolution.")
+    }
+
+    static func testHeartRateWideExternalSampleDoesNotBlockFinerPoints() {
+        let points = [
+            HeartRatePoint(timestamp: date(0), bpm: 52, sourceStepSeconds: 6),
+            HeartRatePoint(timestamp: date(6), bpm: 53, sourceStepSeconds: 6)
+        ]
+        let whoopAverage = ExistingHeartRateSample(id: "whoop-150s", range: range(0, 150), bpm: 52, isOwnedByApp: false, syncIdentifier: nil)
+        let plan = HeartRateCoverageReconciler.plan(points: points, existingSamples: [whoopAverage], stepSeconds: 6)
+        expect(plan.pointsToWrite == points, "A multi-minute external HR average should not block 6s WHOOP points.")
+        expect(plan.externalDuplicateCount == 0, "Wide external HR should not count as a duplicate.")
     }
 
     static func testIncrementalPlannerBacksUpOneHeartRateBucket() {
