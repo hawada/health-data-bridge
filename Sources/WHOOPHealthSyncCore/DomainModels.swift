@@ -128,6 +128,15 @@ public struct SyncSummary: Equatable, Sendable {
     public var heartRateSkipped: Int = 0
     public var heartRateRemoved: Int = 0
     public var heartRateDiscardedOutOfWindow: Int = 0
+    /// Nightly readings (last 14 nights): skin temperature, blood oxygen, respiratory rate and HRV (SDNN).
+    public var skinTemperatureDownloaded: Int = 0
+    public var skinTemperatureWritten: Int = 0
+    public var oxygenSaturationDownloaded: Int = 0
+    public var oxygenSaturationWritten: Int = 0
+    public var respiratoryRateDownloaded: Int = 0
+    public var respiratoryRateWritten: Int = 0
+    public var hrvSDNNDownloaded: Int = 0
+    public var hrvSDNNWritten: Int = 0
     public var effectiveHeartRateResolution: Int?
     public var heartRateWindowStart: Date?
     public var heartRateWindowEnd: Date?
@@ -169,6 +178,14 @@ public struct SyncSummary: Equatable, Sendable {
         heartRateSkipped += other.heartRateSkipped
         heartRateRemoved += other.heartRateRemoved
         heartRateDiscardedOutOfWindow += other.heartRateDiscardedOutOfWindow
+        skinTemperatureDownloaded += other.skinTemperatureDownloaded
+        skinTemperatureWritten += other.skinTemperatureWritten
+        oxygenSaturationDownloaded += other.oxygenSaturationDownloaded
+        oxygenSaturationWritten += other.oxygenSaturationWritten
+        respiratoryRateDownloaded += other.respiratoryRateDownloaded
+        respiratoryRateWritten += other.respiratoryRateWritten
+        hrvSDNNDownloaded += other.hrvSDNNDownloaded
+        hrvSDNNWritten += other.hrvSDNNWritten
         effectiveHeartRateResolution = other.effectiveHeartRateResolution ?? effectiveHeartRateResolution
         heartRateWindowStart = other.heartRateWindowStart ?? heartRateWindowStart
         heartRateWindowEnd = other.heartRateWindowEnd ?? heartRateWindowEnd

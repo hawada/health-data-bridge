@@ -249,8 +249,8 @@ final class SyncEngine {
             if heartRateBoundary.map({ $0 > plan.heartRateWindow.start }) == true { summary.heartRateResult = .pendingAccess }
             interruptedSummary = SyncSummary()
             if historyWindow == nil {
-                await syncSkinTemperature(user: user, now: startedAt, runID: run)
-                await syncNightlyVitals(user: user, now: startedAt, runID: run)
+                await syncSkinTemperature(user: user, now: startedAt, runID: run, summary: &summary)
+                await syncNightlyVitals(user: user, now: startedAt, runID: run, summary: &summary)
             }
             if let recoveryPipeline, historyWindow == nil {
                 do {
@@ -647,10 +647,12 @@ final class SyncEngine {
     }
 
     /// Best effort: skin temperature never fails the sync, it only logs what happened.
-    private func syncSkinTemperature(user: WhoopUser, now: Date, runID: UUID) async {
+    private func syncSkinTemperature(user: WhoopUser, now: Date, runID: UUID, summary: inout SyncSummary) async {
         do {
             let fetch = try await api.fetchSkinTemperatures(userID: user.id, start: now.addingTimeInterval(-14 * 86400), end: now)
+            summary.skinTemperatureDownloaded = fetch.readings.count
             let written = try await healthKit.saveSkinTemperatures(fetch.readings)
+            summary.skinTemperatureWritten = written
             var message = "Temperatura piel: descargadas=\(fetch.readings.count), escritas=\(written)."
             if fetch.readings.isEmpty { message += " Campos recovery: \(fetch.recoveryKeys.joined(separator: ", "))." }
             recordEvent(runID: runID, level: fetch.readings.isEmpty ? "warning" : "info", category: "skin_temp", message: message)
@@ -660,10 +662,17 @@ final class SyncEngine {
     }
 
     /// Best effort: blood oxygen, respiratory rate and HRV never fail the sync, they only log what happened.
-    private func syncNightlyVitals(user: WhoopUser, now: Date, runID: UUID) async {
+    private func syncNightlyVitals(user: WhoopUser, now: Date, runID: UUID, summary: inout SyncSummary) async {
         do {
             let fetch = try await api.fetchNightlyVitals(userID: user.id, start: now.addingTimeInterval(-14 * 86400), end: now)
+            let downloaded = { (vital: NightlyVital) in fetch.readings.filter { $0.vital == vital }.count }
+            summary.oxygenSaturationDownloaded = downloaded(.oxygenSaturation)
+            summary.respiratoryRateDownloaded = downloaded(.respiratoryRate)
+            summary.hrvSDNNDownloaded = downloaded(.heartRateVariability)
             let written = try await healthKit.saveNightlyVitals(fetch.readings)
+            summary.oxygenSaturationWritten = written[.oxygenSaturation] ?? 0
+            summary.respiratoryRateWritten = written[.respiratoryRate] ?? 0
+            summary.hrvSDNNWritten = written[.heartRateVariability] ?? 0
             let counts = NightlyVital.allCases.map { vital in
                 "\(vital.rawValue) descargadas=\(fetch.readings.filter { $0.vital == vital }.count), escritas=\(written[vital] ?? 0)"
             }
